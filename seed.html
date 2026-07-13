@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Seed inicial — Control Operativo</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .seed-wrap { max-width: 640px; margin: 60px auto; padding: 0 20px; }
+    #log { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
+           background: var(--surface-2); padding: 14px; border-radius: 8px; margin-top: 16px;
+           max-height: 320px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div class="seed-wrap">
+    <div class="card">
+      <div className="eyebrow" style="font-family: var(--font-mono); font-size:11px; color: var(--accent); text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px;">Setup único</div>
+      <h1 style="font-family: var(--font-display); margin: 0 0 8px 0;">Inicializar datos base</h1>
+      <p style="color: var(--text-dim); font-size: 14px;">
+        Esta página crea, una sola vez, el árbol de roles, los sectores y las preguntas
+        de ejemplo para "Coordinador de Ventas". <strong>Ejecutala una única vez</strong>
+        (correrla de nuevo duplicaría los datos). Después podés borrar este archivo del
+        repositorio o dejarlo, no es parte de la app que usan los usuarios finales.
+      </p>
+      <button id="btnSeed" class="btn btn-primary">Ejecutar inicialización</button>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="js/firebase-config.js"></script>
+
+  <script>
+    const logEl = document.getElementById('log');
+    function log(msg) {
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function crearRol(nombre, descripcion, rolSuperiorId, permisos) {
+      const ref = await db.collection('roles').add({
+        nombre, descripcion, rolSuperiorId: rolSuperiorId || null,
+        permisos: permisos || {},
+        creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      log(`✓ Rol creado: ${nombre} (${ref.id})`);
+      return ref.id;
+    }
+
+    async function crearSector(nombre) {
+      const ref = await db.collection('sectores').add({ nombre, activo: true });
+      log(`✓ Sector creado: ${nombre}`);
+      return ref.id;
+    }
+
+    async function crearPregunta(rolId, texto, orden) {
+      await db.collection('preguntas').add({
+        rolId, texto, orden, activa: true,
+        creadaEn: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      log(`  · Pregunta: ${texto}`);
+    }
+
+    const PERMISOS_TODO = {
+      administrarRoles: true, administrarUsuarios: true, administrarPreguntas: true,
+      administrarSectores: true, verPanelGlobal: true, verReportesDeEquipo: true,
+      resolverAccionesCorrectivas: true
+    };
+    const PERMISOS_MINIMOS = {
+      administrarRoles: false, administrarUsuarios: false, administrarPreguntas: false,
+      administrarSectores: false, verPanelGlobal: false, verReportesDeEquipo: false,
+      resolverAccionesCorrectivas: false
+    };
+    // Un coordinador sí necesita ver y resolver lo de SU equipo (no admin, pero sí supervisión)
+    const PERMISOS_COORDINADOR_INTERMEDIO = {
+      ...PERMISOS_MINIMOS, verReportesDeEquipo: true, resolverAccionesCorrectivas: true
+    };
+
+    document.getElementById('btnSeed').addEventListener('click', async () => {
+      document.getElementById('btnSeed').disabled = true;
+      log('Iniciando…\n');
+
+      try {
+        // ---- Árbol de roles, según el organigrama ----
+        const gerenciaGeneral = await crearRol('Gerencia General', 'Nivel más alto', null, PERMISOS_TODO);
+
+        const gerenteCompras = await crearRol('Gerente de Compras', '', gerenciaGeneral, PERMISOS_COORDINADOR_INTERMEDIO);
+        const gerenteTienda  = await crearRol('Gerente de Tienda', '', gerenciaGeneral, PERMISOS_COORDINADOR_INTERMEDIO);
+        const tesoreria      = await crearRol('Tesorería', '', gerenciaGeneral, PERMISOS_COORDINADOR_INTERMEDIO);
+
+        const compradoresSector    = await crearRol('Compradores de Sector', '', gerenteCompras, PERMISOS_MINIMOS);
+        const coordinadoresSector  = await crearRol('Coordinadores de Sector', '', gerenteTienda, PERMISOS_MINIMOS);
+        const coordinadoresCaja    = await crearRol('Coordinadores de Caja', '', tesoreria, PERMISOS_MINIMOS);
+
+        // Nota: "Coordinador de Ventas" del documento funcional corresponde
+        // al rol "Coordinadores de Sector" del organigrama (ajustar nombre si preferís uno u otro).
+
+        // ---- Sectores (tienda única, sin sucursales) ----
+        await crearSector('Ventas');
+        await crearSector('Compras');
+        await crearSector('Caja');
+        await crearSector('Limpieza');
+
+        // ---- Preguntas de ejemplo: Coordinador de Ventas / Coordinadores de Sector ----
+        log('\nCreando preguntas para Coordinadores de Sector (Coordinador de Ventas)…');
+        await crearPregunta(coordinadoresSector, 'Flejes en condiciones', 0);
+        await crearPregunta(coordinadoresSector, 'Funcionarios con uniforme', 1);
+        await crearPregunta(coordinadoresSector, 'Sector limpio', 2);
+
+        log('\n✅ Listo. Ahora creá el usuario Admin en Firebase Auth y su perfil en la colección "usuarios" con rolId = "' + gerenciaGeneral + '" (Gerencia General).');
+      } catch (err) {
+        log('\n❌ Error: ' + err.message);
+        console.error(err);
+      }
+
+      document.getElementById('btnSeed').disabled = false;
+    });
+  </script>
+</body>
+</html>

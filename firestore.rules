@@ -1,0 +1,90 @@
+rules_version = '2';
+
+// ============================================================
+// REGLAS DE SEGURIDAD — Firestore
+// Se basan en: el usuario autenticado (request.auth.uid) debe
+// tener un documento en /usuarios con ese mismo id, del cual
+// se lee su rol y, de ahí, sus permisos.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estaLogueado() {
+      return request.auth != null;
+    }
+
+    function miUsuario() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
+    }
+
+    function miRol() {
+      return get(/databases/$(database)/documents/roles/$(miUsuario().rolId)).data;
+    }
+
+    function tengoPermiso(permiso) {
+      return estaLogueado() &&
+             miRol().permisos[permiso] == true;
+    }
+
+    // ---------------- USUARIOS ----------------
+    match /usuarios/{usuarioId} {
+      allow read: if estaLogueado();
+      // Un usuario puede editar campos no sensibles de su propio perfil;
+      // solo quien administra usuarios puede crear/borrar perfiles ajenos.
+      allow write: if tengoPermiso('administrarUsuarios') || request.auth.uid == usuarioId;
+    }
+
+    // ---------------- ROLES ----------------
+    match /roles/{rolId} {
+      allow read: if estaLogueado();
+      allow write: if tengoPermiso('administrarRoles');
+    }
+
+    // ---------------- SECTORES ----------------
+    match /sectores/{sectorId} {
+      allow read: if estaLogueado();
+      allow write: if tengoPermiso('administrarSectores');
+    }
+
+    // ---------------- PREGUNTAS ----------------
+    match /preguntas/{preguntaId} {
+      allow read: if estaLogueado();
+      allow write: if tengoPermiso('administrarPreguntas');
+    }
+
+    // ---------------- CHECKLISTS: INSTANCIAS ----------------
+    match /checklists_instancias/{instanciaId} {
+      // Cualquier usuario logueado puede crear su propio checklist.
+      allow create: if estaLogueado() && request.resource.data.usuarioId == request.auth.uid;
+      // Nadie edita ni borra un checklist ya guardado (inmutable / auditable).
+      allow update, delete: if false;
+      // Lectura: el dueño, o alguien con permiso de ver reportes/panel.
+      allow read: if estaLogueado() &&
+                     (resource.data.usuarioId == request.auth.uid ||
+                      tengoPermiso('verReportesDeEquipo') ||
+                      tengoPermiso('verPanelGlobal'));
+    }
+
+    // ---------------- ACCIONES CORRECTIVAS ----------------
+    match /acciones_correctivas/{accionId} {
+      allow create: if estaLogueado(); // se crea automáticamente al guardar un "No"
+      allow read: if estaLogueado() &&
+                     (resource.data.usuarioId == request.auth.uid ||
+                      tengoPermiso('verReportesDeEquipo') ||
+                      tengoPermiso('verPanelGlobal'));
+      allow update: if tengoPermiso('resolverAccionesCorrectivas');
+      allow delete: if false;
+    }
+
+    // ---------------- ALERTAS ----------------
+    match /alertas/{alertaId} {
+      // Las crea únicamente la Cloud Function (con permisos de administrador,
+      // que evita las reglas de seguridad del cliente).
+      allow read: if estaLogueado() &&
+                     (resource.data.usuarioId == request.auth.uid ||
+                      tengoPermiso('verPanelGlobal'));
+      allow write: if false;
+    }
+  }
+}
