@@ -8,6 +8,7 @@ function App() {
   const [usuario, setUsuario] = React.useState(null); // documento de /usuarios
   const [rol, setRol] = React.useState(null);
   const [pantalla, setPantalla] = React.useState('checklist');
+  const [sidebarAbierto, setSidebarAbierto] = React.useState(false);
 
   React.useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
@@ -68,8 +69,6 @@ function App() {
   const puedeAdministrar = permisos.administrarRoles || permisos.administrarUsuarios ||
                             permisos.administrarPreguntas || permisos.administrarSectores;
   const tieneMasDeUnaSeccion = puedeVerPanel || puedeAdministrar;
-
-  const [sidebarAbierto, setSidebarAbierto] = React.useState(false);
 
   function irA(p) {
     setPantalla(p);
