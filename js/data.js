@@ -22,7 +22,7 @@ const Data = {
   // Crea el login (Firebase Auth) y el perfil (Firestore) de un usuario
   // nuevo en un solo paso, usando la instancia secundaria de Firebase
   // para no afectar la sesión del Admin que lo está creando.
-  async crearUsuarioCompleto({ nombre, email, password, rolId, sectores }) {
+  async crearUsuarioCompleto({ nombre, email, password, rolId, sectores, verPanelCompleto }) {
     const authSecundaria = getAuthSecundaria();
     const cred = await authSecundaria.createUserWithEmailAndPassword(email.trim(), password);
     const uid = cred.user.uid;
@@ -36,6 +36,9 @@ const Data = {
       email: email.trim(),
       rolId,
       sectores: sectores || [],
+      // Si ve todos los reportes de su equipo (según jerarquía de roles) o
+      // solo su propio historial. Por defecto true (comportamiento anterior).
+      verPanelCompleto: verPanelCompleto !== false,
       activo: true,
       creadoEn: firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -187,18 +190,34 @@ const Data = {
 
   // ---------- PREGUNTAS ----------
 
-  async getPreguntasPorRol(rolId) {
+  // Trae las preguntas activas de un rol para un sector específico.
+  // sectorId puede ser null (roles que no están atados a un sector físico,
+  // ej. Gerencia General): en ese caso se filtra por preguntas "generales"
+  // (sin sector asignado).
+  async getPreguntasPorRolYSector(rolId, sectorId) {
     const snap = await db.collection('preguntas')
       .where('rolId', '==', rolId)
+      .where('sectorId', '==', sectorId || null)
       .where('activa', '==', true)
       .orderBy('orden')
       .get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  async crearPregunta({ rolId, texto, orden }) {
+  // Todas las preguntas (activas o no) de un rol+sector, para administración.
+  async getPreguntasAdmin(rolId, sectorId) {
+    const snap = await db.collection('preguntas')
+      .where('rolId', '==', rolId)
+      .where('sectorId', '==', sectorId || null)
+      .get();
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  },
+
+  async crearPregunta({ rolId, sectorId, texto, orden }) {
     return db.collection('preguntas').add({
-      rolId, texto, orden: orden || 0, activa: true,
+      rolId, sectorId: sectorId || null, texto, orden: orden || 0, activa: true,
       creadaEn: firebase.firestore.FieldValue.serverTimestamp()
     });
   },
@@ -223,12 +242,14 @@ const Data = {
     return d.toISOString().slice(0, 10); // YYYY-MM-DD
   },
 
-  // ¿Ya completó este usuario el checklist del momento actual, hoy?
-  async yaCompletoHoy(usuarioId, momento) {
+  // ¿Ya completó este usuario el checklist del momento actual, hoy,
+  // para este sector puntual? (sectorId puede ser null para roles sin sector)
+  async yaCompletoHoy(usuarioId, momento, sectorId) {
     const snap = await db.collection('checklists_instancias')
       .where('usuarioId', '==', usuarioId)
       .where('fecha', '==', this.getFechaHoy())
       .where('momento', '==', momento)
+      .where('sectorId', '==', sectorId || null)
       .limit(1)
       .get();
     return !snap.empty;

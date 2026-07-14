@@ -34,28 +34,41 @@ function DashboardScreen({ usuario }) {
   const [checklistsHoy, setChecklistsHoy] = React.useState(null);
   const [resueltas, setResueltas] = React.useState(null);
   const [errorHistorial, setErrorHistorial] = React.useState('');
+  const [rolIds, setRolIds] = React.useState([usuario.rolId]);
+
+  // Si el usuario tiene verPanelCompleto === false, solo ve sus propios
+  // checklists y casos, aunque su rol tenga permiso de supervisar equipo.
+  const modoCompleto = usuario.verPanelCompleto !== false;
 
   React.useEffect(() => {
     async function cargar() {
-      const [pend, subRoles] = await Promise.all([
-        Data.getAccionesPendientes(),
-        Data.getRolesDescendientes(usuario.rolId)
-      ]);
+      const subRoles = modoCompleto ? await Data.getRolesDescendientes(usuario.rolId) : [];
+      const idsRoles = [usuario.rolId, ...subRoles.map(r => r.id)];
+      setRolIds(idsRoles);
+
+      const pendTodas = await Data.getAccionesPendientes();
+      const pend = modoCompleto
+        ? pendTodas.filter(a => idsRoles.includes(a.rolId))
+        : pendTodas.filter(a => a.usuarioId === usuario.id);
       setAcciones(pend);
 
-      const rolIds = [usuario.rolId, ...subRoles.map(r => r.id)];
-      const cl = await Data.getChecklistsPorRoles(rolIds, { fecha: Data.getFechaHoy() });
+      const clRoles = await Data.getChecklistsPorRoles(modoCompleto ? idsRoles : [usuario.rolId], { fecha: Data.getFechaHoy() });
+      const cl = modoCompleto ? clRoles : clRoles.filter(c => c.usuarioId === usuario.id);
       setChecklistsHoy(cl);
 
       try {
-        setResueltas(await Data.getAccionesResueltas());
+        const resueltasTodas = await Data.getAccionesResueltas();
+        const res = modoCompleto
+          ? resueltasTodas.filter(a => idsRoles.includes(a.rolId))
+          : resueltasTodas.filter(a => a.usuarioId === usuario.id);
+        setResueltas(res);
       } catch (err) {
         console.error('Error cargando historial de acciones resueltas:', err);
         setErrorHistorial('No se pudo cargar el historial (probablemente falte crear un índice en Firestore — revisá la consola, F12, para el link de creación).');
       }
     }
     cargar();
-  }, [usuario.rolId]);
+  }, [usuario.rolId, usuario.id, modoCompleto]);
 
   const totalRespuestas = (checklistsHoy || []).reduce((acc, c) => acc + c.respuestas.length, 0);
   const totalNegativas = (checklistsHoy || []).reduce(
@@ -65,6 +78,12 @@ function DashboardScreen({ usuario }) {
 
   return (
     <div>
+      {!modoCompleto && (
+        <div className="badge" style={{ background: 'var(--surface-2)', color: 'var(--text-dim)', marginBottom: 16 }}>
+          Mostrando solo tu propio historial
+        </div>
+      )}
+
       <div className="stat-grid">
         <div className="stat-tile">
           <div className="stat-value" style={{ color: 'var(--accent)' }}>
@@ -141,14 +160,14 @@ function DashboardScreen({ usuario }) {
         ))}
       </div>
 
-      <MetricasScreen />
+      <MetricasScreen modoCompleto={modoCompleto} usuarioId={usuario.id} rolIds={rolIds} />
     </div>
   );
 }
 
 /* ---------------- MÉTRICAS: gráficos por fecha y por sector ---------------- */
 
-function MetricasScreen() {
+function MetricasScreen({ modoCompleto, usuarioId, rolIds }) {
   const hoy = Data.getFechaHoy();
   const hace30dias = (() => {
     const d = new Date();
@@ -173,14 +192,17 @@ function MetricasScreen() {
     setError('');
     setDatos(null);
     try {
-      const acciones = await Data.getAccionesEnRango(desde, hasta);
-      setDatos(acciones);
+      const todas = await Data.getAccionesEnRango(desde, hasta);
+      const filtradas = modoCompleto
+        ? todas.filter(a => rolIds.includes(a.rolId))
+        : todas.filter(a => a.usuarioId === usuarioId);
+      setDatos(filtradas);
     } catch (err) {
       console.error('Error cargando métricas:', err);
       setError('No se pudieron cargar las métricas para ese rango.');
     }
   }
-  React.useEffect(() => { cargar(); }, [desde, hasta]);
+  React.useEffect(() => { cargar(); }, [desde, hasta, modoCompleto, (rolIds || []).join(',')]);
 
   function nombreSector(id) {
     return (sectores.find(s => s.id === id) || {}).nombre || 'Sin sector';
@@ -314,7 +336,7 @@ function MetricasScreen() {
           {datos.length === 0 ? (
             <div className="empty-state">No hay casos reportados en este rango de fechas.</div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="metrics-chart-grid">
               <div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Por fecha</div>
                 <canvas ref={canvasDiaRef} height="180"></canvas>

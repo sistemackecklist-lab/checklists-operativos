@@ -281,30 +281,36 @@ function AdminSectores() {
 
 function AdminPreguntas() {
   const [roles, setRoles] = React.useState([]);
+  const [sectores, setSectores] = React.useState([]);
   const [rolId, setRolId] = React.useState('');
+  const [sectorId, setSectorId] = React.useState(''); // '' = todavía no elegido, 'general' = sin sector
   const [preguntas, setPreguntas] = React.useState(null);
   const [texto, setTexto] = React.useState('');
 
-  React.useEffect(() => { Data.getRoles().then(setRoles); }, []);
+  React.useEffect(() => {
+    Data.getRoles().then(setRoles);
+    Data.getSectores().then(setSectores);
+  }, []);
 
-  async function cargarPreguntas(rid) {
-    if (!rid) { setPreguntas(null); return; }
-    setPreguntas(await Data.getPreguntasPorRol(rid));
+  async function cargarPreguntas(rid, sid) {
+    if (!rid || !sid) { setPreguntas(null); return; }
+    setPreguntas(await Data.getPreguntasAdmin(rid, sid === 'general' ? null : sid));
   }
 
-  React.useEffect(() => { cargarPreguntas(rolId); }, [rolId]);
+  React.useEffect(() => { setSectorId(''); }, [rolId]);
+  React.useEffect(() => { cargarPreguntas(rolId, sectorId); }, [rolId, sectorId]);
 
   async function agregar() {
-    if (!texto.trim() || !rolId) return;
+    if (!texto.trim() || !rolId || !sectorId) return;
     const orden = (preguntas || []).length;
-    await Data.crearPregunta({ rolId, texto: texto.trim(), orden });
+    await Data.crearPregunta({ rolId, sectorId: sectorId === 'general' ? null : sectorId, texto: texto.trim(), orden });
     setTexto('');
-    cargarPreguntas(rolId);
+    cargarPreguntas(rolId, sectorId);
   }
 
   async function desactivar(id) {
     await Data.desactivarPregunta(id);
-    cargarPreguntas(rolId);
+    cargarPreguntas(rolId, sectorId);
   }
 
   return (
@@ -319,6 +325,17 @@ function AdminPreguntas() {
         </div>
 
         {rolId && (
+          <div className="field">
+            <label>Sector</label>
+            <select value={sectorId} onChange={e => setSectorId(e.target.value)}>
+              <option value="">Seleccioná un sector…</option>
+              {sectores.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+              <option value="general">— General (sin sector) —</option>
+            </select>
+          </div>
+        )}
+
+        {rolId && sectorId && (
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Texto de la nueva pregunta"
                    style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', color: 'var(--text)' }} />
@@ -327,16 +344,18 @@ function AdminPreguntas() {
         )}
       </div>
 
-      {rolId && (
+      {rolId && sectorId && (
         <div className="card">
           {preguntas === null && <div className="spinner-row">Cargando…</div>}
-          {preguntas && preguntas.map(p => (
+          {preguntas && preguntas.filter(p => p.activa).map(p => (
             <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
               <span>{p.texto}</span>
               <button className="btn btn-ghost" onClick={() => desactivar(p.id)}>Desactivar</button>
             </div>
           ))}
-          {preguntas && preguntas.length === 0 && <div className="empty-state">Este rol todavía no tiene preguntas activas.</div>}
+          {preguntas && preguntas.filter(p => p.activa).length === 0 && (
+            <div className="empty-state">Este rol todavía no tiene preguntas activas para este sector.</div>
+          )}
         </div>
       )}
     </div>
@@ -357,6 +376,7 @@ function AdminUsuarios() {
   const [password, setPassword] = React.useState('');
   const [rolId, setRolId] = React.useState('');
   const [sectoresSel, setSectoresSel] = React.useState([]);
+  const [verPanelCompleto, setVerPanelCompleto] = React.useState(true);
   const [guardando, setGuardando] = React.useState(false);
   const [error, setError] = React.useState('');
   const [exito, setExito] = React.useState('');
@@ -366,6 +386,7 @@ function AdminUsuarios() {
   const [editNombre, setEditNombre] = React.useState('');
   const [editRolId, setEditRolId] = React.useState('');
   const [editSectores, setEditSectores] = React.useState([]);
+  const [editVerPanelCompleto, setEditVerPanelCompleto] = React.useState(true);
 
   // Cada consulta se carga por separado: si una falla (ej. falta un
   // índice en Firestore), no tumba a las demás.
@@ -398,7 +419,7 @@ function AdminUsuarios() {
   }
 
   function limpiarForm() {
-    setNombre(''); setEmail(''); setPassword(''); setRolId(''); setSectoresSel([]);
+    setNombre(''); setEmail(''); setPassword(''); setRolId(''); setSectoresSel([]); setVerPanelCompleto(true);
   }
 
   async function crear() {
@@ -413,7 +434,7 @@ function AdminUsuarios() {
     }
     setGuardando(true);
     try {
-      await Data.crearUsuarioCompleto({ nombre, email, password, rolId, sectores: sectoresSel });
+      await Data.crearUsuarioCompleto({ nombre, email, password, rolId, sectores: sectoresSel, verPanelCompleto });
       setExito(`Usuario "${nombre}" creado correctamente.`);
       limpiarForm();
       cargarTodo();
@@ -434,11 +455,12 @@ function AdminUsuarios() {
     setEditNombre(u.nombre || '');
     setEditRolId(u.rolId || '');
     setEditSectores(u.sectores || []);
+    setEditVerPanelCompleto(u.verPanelCompleto !== false);
   }
 
   async function guardarEdicion(id) {
     if (!editNombre.trim() || !editRolId) return;
-    await Data.actualizarUsuario(id, { nombre: editNombre.trim(), rolId: editRolId, sectores: editSectores });
+    await Data.actualizarUsuario(id, { nombre: editNombre.trim(), rolId: editRolId, sectores: editSectores, verPanelCompleto: editVerPanelCompleto });
     setEditandoId(null);
     cargarTodo();
   }
@@ -489,6 +511,15 @@ function AdminUsuarios() {
             {sectores.length === 0 && <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>No hay sectores cargados todavía.</span>}
           </div>
         </div>
+        <div className="field">
+          <label className="checkbox-row" style={{ marginBottom: 0 }}>
+            <input type="checkbox" checked={verPanelCompleto} onChange={e => setVerPanelCompleto(e.target.checked)} />
+            Puede ver el Panel de todo su equipo (no solo su propio historial)
+          </label>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)', display: 'block', marginTop: 4 }}>
+            Solo aplica si el rol tiene acceso al Panel. Desmarcado, esta persona solo va a ver sus propios checklists y casos, aunque el rol permita supervisar.
+          </span>
+        </div>
 
         {error && <div className="error-text">{error}</div>}
         {exito && <div style={{ color: 'var(--ok)', fontSize: 13, marginBottom: 14 }}>{exito}</div>}
@@ -502,7 +533,7 @@ function AdminUsuarios() {
 
       <div className="card">
         <table className="data-table">
-          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th><th>Panel</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {(usuarios || []).map(u => (
               editandoId === u.id ? (
@@ -524,6 +555,12 @@ function AdminUsuarios() {
                       ))}
                     </div>
                   </td>
+                  <td>
+                    <label style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center', maxWidth: 110 }}>
+                      <input type="checkbox" checked={editVerPanelCompleto} onChange={e => setEditVerPanelCompleto(e.target.checked)} />
+                      Ve todo el equipo
+                    </label>
+                  </td>
                   <td>{u.activo === false ? <span className="badge badge-danger">Inactivo</span> : <span className="badge badge-ok">Activo</span>}</td>
                   <td style={{ display: 'flex', gap: 6 }}>
                     <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => guardarEdicion(u.id)}>Guardar</button>
@@ -536,6 +573,11 @@ function AdminUsuarios() {
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
                   <td>{nombreRol(u.rolId)}</td>
                   <td>{(u.sectores || []).length}</td>
+                  <td>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                      {u.verPanelCompleto === false ? 'Solo propio' : 'Equipo'}
+                    </span>
+                  </td>
                   <td>{u.activo === false ? <span className="badge badge-danger">Inactivo</span> : <span className="badge badge-ok">Activo</span>}</td>
                   <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                     <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => empezarEdicion(u)}>Editar</button>

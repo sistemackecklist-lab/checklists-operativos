@@ -67,24 +67,52 @@ function App() {
   const puedeVerPanel = permisos.verPanelGlobal || permisos.verReportesDeEquipo || permisos.resolverAccionesCorrectivas;
   const puedeAdministrar = permisos.administrarRoles || permisos.administrarUsuarios ||
                             permisos.administrarPreguntas || permisos.administrarSectores;
+  const tieneMasDeUnaSeccion = puedeVerPanel || puedeAdministrar;
+
+  const [sidebarAbierto, setSidebarAbierto] = React.useState(false);
+
+  function irA(p) {
+    setPantalla(p);
+    setSidebarAbierto(false);
+  }
 
   return (
     <div className="app-shell">
-      <div className="sidebar">
+      {/* Barra superior — solo visible en celular (ver CSS) */}
+      <div className="mobile-topbar">
+        <div className="sidebar-brand" style={{ border: 'none', margin: 0, padding: 0 }}>
+          <span className="dot"></span>Control Operativo
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {tieneMasDeUnaSeccion && (
+            <button className="hamburger-btn" onClick={() => setSidebarAbierto(true)} aria-label="Abrir menú">
+              ☰
+            </button>
+          )}
+          <button className="hamburger-btn" onClick={() => auth.signOut()} aria-label="Cerrar sesión" title="Cerrar sesión">
+            ⏻
+          </button>
+        </div>
+      </div>
+
+      {/* Fondo oscuro detrás del menú cuando está abierto en celular */}
+      {sidebarAbierto && <div className="sidebar-overlay" onClick={() => setSidebarAbierto(false)}></div>}
+
+      <div className={'sidebar' + (sidebarAbierto ? ' open' : '')}>
         <div className="sidebar-brand"><span className="dot"></span>Control Operativo</div>
 
-        <button className={'nav-item' + (pantalla === 'checklist' ? ' active' : '')} onClick={() => setPantalla('checklist')}>
+        <button className={'nav-item' + (pantalla === 'checklist' ? ' active' : '')} onClick={() => irA('checklist')}>
           Mi checklist
         </button>
 
         {puedeVerPanel && (
-          <button className={'nav-item' + (pantalla === 'panel' ? ' active' : '')} onClick={() => setPantalla('panel')}>
+          <button className={'nav-item' + (pantalla === 'panel' ? ' active' : '')} onClick={() => irA('panel')}>
             Panel
           </button>
         )}
 
         {puedeAdministrar && (
-          <button className={'nav-item' + (pantalla === 'admin' ? ' active' : '')} onClick={() => setPantalla('admin')}>
+          <button className={'nav-item' + (pantalla === 'admin' ? ' active' : '')} onClick={() => irA('admin')}>
             Administración
           </button>
         )}
