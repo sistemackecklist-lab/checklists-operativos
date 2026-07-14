@@ -6,6 +6,8 @@
 function DashboardScreen({ usuario }) {
   const [acciones, setAcciones] = React.useState(null);
   const [checklistsHoy, setChecklistsHoy] = React.useState(null);
+  const [resueltas, setResueltas] = React.useState(null);
+  const [errorHistorial, setErrorHistorial] = React.useState('');
 
   React.useEffect(() => {
     async function cargar() {
@@ -18,6 +20,12 @@ function DashboardScreen({ usuario }) {
       const rolIds = [usuario.rolId, ...subRoles.map(r => r.id)];
       const cl = await Data.getChecklistsPorRoles(rolIds, { fecha: Data.getFechaHoy() });
       setChecklistsHoy(cl);
+
+      try {
+        setResueltas(await Data.getAccionesResueltas());
+      } catch (err) {
+        setErrorHistorial('No se pudo cargar el historial (probablemente falte crear un índice en Firestore — revisá la consola, F12, para el link de creación).');
+      }
     }
     cargar();
   }, [usuario.rolId]);
@@ -61,9 +69,43 @@ function DashboardScreen({ usuario }) {
           <div className="empty-state">No hay respuestas negativas sin resolver. 👍</div>
         )}
         {acciones && acciones.map(a => (
-          <AccionCorrectivaRow key={a.id} accion={a} onResuelto={() => {
+          <AccionCorrectivaRow key={a.id} accion={a} onResuelto={(accionResuelta) => {
             setAcciones(prev => prev.filter(x => x.id !== a.id));
+            setResueltas(prev => prev ? [accionResuelta, ...prev] : [accionResuelta]);
           }} />
+        ))}
+      </div>
+
+      <div className="card">
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 4 }}>
+          Historial de resoluciones
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 12 }}>
+          Últimos casos ya revisados y cerrados.
+        </div>
+
+        {errorHistorial && <div className="error-text" style={{ margin: '0 0 12px 0' }}>{errorHistorial}</div>}
+        {resueltas === null && !errorHistorial && <div className="spinner-row">Cargando…</div>}
+        {resueltas && resueltas.length === 0 && (
+          <div className="empty-state">Todavía no hay casos resueltos.</div>
+        )}
+        {resueltas && resueltas.map(a => (
+          <div key={a.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--border-soft)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{a.preguntaTexto}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  {a.usuarioNombre} · {a.fecha}
+                </div>
+              </div>
+              <span className="badge badge-ok">✓ Resuelto</span>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 8 }}>
+              <div><strong style={{ color: 'var(--text)' }}>Motivo:</strong> {a.motivoInformado}</div>
+              {a.observacionSupervisor && <div style={{ marginTop: 4 }}><strong style={{ color: 'var(--text)' }}>Observación:</strong> {a.observacionSupervisor}</div>}
+              {a.accionRealizada && <div style={{ marginTop: 4 }}><strong style={{ color: 'var(--text)' }}>Acción realizada:</strong> {a.accionRealizada}</div>}
+            </div>
+          </div>
         ))}
       </div>
     </div>
@@ -78,12 +120,13 @@ function AccionCorrectivaRow({ accion, onResuelto }) {
 
   async function resolver() {
     setGuardando(true);
-    await Data.resolverAccion(accion.id, {
+    const datos = {
       observacionSupervisor: observacion.trim(),
       accionRealizada: accionRealizada.trim()
-    });
+    };
+    await Data.resolverAccion(accion.id, datos);
     setGuardando(false);
-    onResuelto();
+    onResuelto({ ...accion, ...datos, resuelto: true });
   }
 
   return (

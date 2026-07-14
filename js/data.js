@@ -274,6 +274,15 @@ const Data = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
+  async getAccionesResueltas(limite = 30) {
+    const snap = await db.collection('acciones_correctivas')
+      .where('resuelto', '==', true)
+      .orderBy('resueltoEn', 'desc')
+      .limit(limite)
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
   async resolverAccion(accionId, { observacionSupervisor, accionRealizada }) {
     return db.collection('acciones_correctivas').doc(accionId).update({
       observacionSupervisor, accionRealizada,
