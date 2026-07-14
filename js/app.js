@@ -48,6 +48,21 @@ function App() {
     );
   }
 
+  if (authUser && usuario && usuario.activo === false) {
+    return (
+      <div className="login-screen">
+        <div className="login-panel">
+          <div className="login-brand"><span className="dot" style={{ background: 'var(--danger)', boxShadow: 'none' }}></span>Cuenta desactivada</div>
+          <div className="login-sub">
+            Tu usuario fue desactivado por un administrador. Si creés que es un error,
+            consultalo con tu superior.
+          </div>
+          <button className="btn btn-ghost btn-block" onClick={() => auth.signOut()}>Cerrar sesión</button>
+        </div>
+      </div>
+    );
+  }
+
   const permisos = (rol && rol.permisos) || {};
   const puedeVerPanel = permisos.verPanelGlobal || permisos.verReportesDeEquipo || permisos.resolverAccionesCorrectivas;
   const puedeAdministrar = permisos.administrarRoles || permisos.administrarUsuarios ||

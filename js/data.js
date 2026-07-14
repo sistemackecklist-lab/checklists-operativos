@@ -51,6 +51,25 @@ const Data = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
+  async actualizarUsuario(usuarioId, { nombre, rolId, sectores }) {
+    return db.collection('usuarios').doc(usuarioId).update({ nombre, rolId, sectores: sectores || [] });
+  },
+
+  // No se puede borrar la credencial de Auth de otro usuario desde el
+  // cliente (requiere privilegios de administrador / Cloud Function).
+  // Por eso, "eliminar" un usuario en la app significa desactivar su
+  // perfil: no puede volver a loguearse útilmente (queda sin permisos
+  // ni datos visibles) y desaparece de los listados de personas activas,
+  // pero su credencial de login sigue técnicamente existiendo en
+  // Firebase Auth hasta que la borren manualmente desde la consola.
+  async desactivarUsuario(usuarioId) {
+    return db.collection('usuarios').doc(usuarioId).update({ activo: false });
+  },
+
+  async reactivarUsuario(usuarioId) {
+    return db.collection('usuarios').doc(usuarioId).update({ activo: true });
+  },
+
   // ---------- ROLES ----------
 
   async getRoles() {
@@ -117,6 +136,24 @@ const Data = {
 
   async crearSector(nombre) {
     return db.collection('sectores').add({ nombre, activo: true });
+  },
+
+  async actualizarSector(sectorId, nombre) {
+    return db.collection('sectores').doc(sectorId).update({ nombre });
+  },
+
+  async puedeEliminarSector(sectorId) {
+    const snap = await db.collection('usuarios').where('sectores', 'array-contains', sectorId).get();
+    if (!snap.empty) {
+      return { puede: false, motivo: `Hay ${snap.size} usuario(s) asignados a este sector.` };
+    }
+    return { puede: true, motivo: '' };
+  },
+
+  // Soft-delete: se desactiva en vez de borrar, para no perder la
+  // trazabilidad histórica de los checklists ya guardados con este sector.
+  async eliminarSector(sectorId) {
+    return db.collection('sectores').doc(sectorId).update({ activo: false });
   },
 
   // ---------- PREGUNTAS ----------

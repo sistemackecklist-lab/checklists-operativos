@@ -187,15 +187,52 @@ function AdminRoles() {
 
 function AdminSectores() {
   const [sectores, setSectores] = React.useState(null);
+  const [error, setError] = React.useState('');
   const [nombre, setNombre] = React.useState('');
+  const [editandoId, setEditandoId] = React.useState(null);
+  const [nombreEdit, setNombreEdit] = React.useState('');
 
-  async function cargar() { setSectores(await Data.getSectores()); }
+  async function cargar() {
+    setError('');
+    try {
+      setSectores(await Data.getSectores());
+    } catch (err) {
+      setError(
+        err.code === 'failed-precondition'
+          ? 'Falta crear un índice en Firestore para esta consulta. Mirá la consola (F12) — el error trae un link para crearlo con un clic.'
+          : 'No se pudieron cargar los sectores: ' + err.message
+      );
+    }
+  }
   React.useEffect(() => { cargar(); }, []);
 
   async function crear() {
     if (!nombre.trim()) return;
     await Data.crearSector(nombre.trim());
     setNombre('');
+    cargar();
+  }
+
+  function empezarEdicion(s) {
+    setEditandoId(s.id);
+    setNombreEdit(s.nombre);
+  }
+
+  async function guardarEdicion(id) {
+    if (!nombreEdit.trim()) return;
+    await Data.actualizarSector(id, nombreEdit.trim());
+    setEditandoId(null);
+    cargar();
+  }
+
+  async function eliminar(s) {
+    const chequeo = await Data.puedeEliminarSector(s.id);
+    if (!chequeo.puede) {
+      alert(`No se puede eliminar "${s.nombre}": ${chequeo.motivo}`);
+      return;
+    }
+    if (!confirm(`¿Eliminar el sector "${s.nombre}"?`)) return;
+    await Data.eliminarSector(s.id);
     cargar();
   }
 
@@ -207,9 +244,31 @@ function AdminSectores() {
           <button className="btn btn-primary" onClick={crear} disabled={!nombre.trim()}>Agregar</button>
         </div>
       </div>
+
+      {error && <div className="card" style={{ borderColor: 'var(--danger)' }}><span className="error-text" style={{ margin: 0 }}>{error}</span></div>}
+
       <div className="card">
+        {sectores === null && !error && <div className="spinner-row">Cargando…</div>}
         {(sectores || []).map(s => (
-          <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-soft)' }}>{s.nombre}</div>
+          <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
+            {editandoId === s.id ? (
+              <>
+                <input value={nombreEdit} onChange={e => setNombreEdit(e.target.value)} style={{ flex: 1, marginRight: 10, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)' }} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => guardarEdicion(s.id)}>Guardar</button>
+                  <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setEditandoId(null)}>Cancelar</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span>{s.nombre}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => empezarEdicion(s)}>Editar</button>
+                  <button className="btn btn-danger" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => eliminar(s)}>Eliminar</button>
+                </div>
+              </>
+            )}
+          </div>
         ))}
         {sectores && sectores.length === 0 && <div className="empty-state">Todavía no hay sectores.</div>}
       </div>
@@ -289,6 +348,7 @@ function AdminUsuarios() {
   const [usuarios, setUsuarios] = React.useState(null);
   const [roles, setRoles] = React.useState([]);
   const [sectores, setSectores] = React.useState([]);
+  const [errorCarga, setErrorCarga] = React.useState('');
 
   // Formulario de alta
   const [nombre, setNombre] = React.useState('');
@@ -300,9 +360,27 @@ function AdminUsuarios() {
   const [error, setError] = React.useState('');
   const [exito, setExito] = React.useState('');
 
+  // Edición de un usuario existente
+  const [editandoId, setEditandoId] = React.useState(null);
+  const [editNombre, setEditNombre] = React.useState('');
+  const [editRolId, setEditRolId] = React.useState('');
+  const [editSectores, setEditSectores] = React.useState([]);
+
+  // Cada consulta se carga por separado: si una falla (ej. falta un
+  // índice en Firestore), no tumba a las demás.
   async function cargarTodo() {
-    const [u, r, s] = await Promise.all([Data.getUsuarios(), Data.getRoles(), Data.getSectores()]);
-    setUsuarios(u); setRoles(r); setSectores(s);
+    setErrorCarga('');
+    const [uRes, rRes, sRes] = await Promise.allSettled([
+      Data.getUsuarios(), Data.getRoles(), Data.getSectores()
+    ]);
+    if (uRes.status === 'fulfilled') setUsuarios(uRes.value); else setUsuarios([]);
+    if (rRes.status === 'fulfilled') setRoles(rRes.value); else setRoles([]);
+    if (sRes.status === 'fulfilled') setSectores(sRes.value); else setSectores([]);
+
+    const fallidas = [uRes, rRes, sRes].filter(r => r.status === 'rejected');
+    if (fallidas.length) {
+      setErrorCarga('No se pudo cargar todo correctamente. Revisá la consola (F12) — es probable que falte crear un índice en Firestore (el error trae un link para crearlo con un clic).');
+    }
   }
   React.useEffect(() => { cargarTodo(); }, []);
 
@@ -312,6 +390,10 @@ function AdminUsuarios() {
 
   function toggleSector(id) {
     setSectoresSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  function toggleSectorEdit(id) {
+    setEditSectores(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
   function limpiarForm() {
@@ -344,6 +426,30 @@ function AdminUsuarios() {
       }
     }
     setGuardando(false);
+  }
+
+  function empezarEdicion(u) {
+    setEditandoId(u.id);
+    setEditNombre(u.nombre || '');
+    setEditRolId(u.rolId || '');
+    setEditSectores(u.sectores || []);
+  }
+
+  async function guardarEdicion(id) {
+    if (!editNombre.trim() || !editRolId) return;
+    await Data.actualizarUsuario(id, { nombre: editNombre.trim(), rolId: editRolId, sectores: editSectores });
+    setEditandoId(null);
+    cargarTodo();
+  }
+
+  async function toggleActivo(u) {
+    if (u.activo === false) {
+      await Data.reactivarUsuario(u.id);
+    } else {
+      if (!confirm(`¿Desactivar a "${u.nombre}"? No va a poder usar el sistema hasta que lo reactives. (Su login en Firebase Auth no se borra; eso se hace desde la consola de Firebase si hace falta.)`)) return;
+      await Data.desactivarUsuario(u.id);
+    }
+    cargarTodo();
   }
 
   return (
@@ -391,17 +497,53 @@ function AdminUsuarios() {
         </button>
       </div>
 
+      {errorCarga && <div className="card" style={{ borderColor: 'var(--danger)' }}><span className="error-text" style={{ margin: 0 }}>{errorCarga}</span></div>}
+
       <div className="card">
         <table className="data-table">
-          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th><th>Estado</th><th></th></tr></thead>
           <tbody>
             {(usuarios || []).map(u => (
-              <tr key={u.id}>
-                <td>{u.nombre}</td>
-                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
-                <td>{nombreRol(u.rolId)}</td>
-                <td>{(u.sectores || []).length}</td>
-              </tr>
+              editandoId === u.id ? (
+                <tr key={u.id}>
+                  <td><input value={editNombre} onChange={e => setEditNombre(e.target.value)} style={{ width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }} /></td>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
+                  <td>
+                    <select value={editRolId} onChange={e => setEditRolId(e.target.value)} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}>
+                      {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {sectores.map(s => (
+                        <label key={s.id} style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input type="checkbox" checked={editSectores.includes(s.id)} onChange={() => toggleSectorEdit(s.id)} />
+                          {s.nombre}
+                        </label>
+                      ))}
+                    </div>
+                  </td>
+                  <td>{u.activo === false ? <span className="badge badge-danger">Inactivo</span> : <span className="badge badge-ok">Activo</span>}</td>
+                  <td style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => guardarEdicion(u.id)}>Guardar</button>
+                    <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setEditandoId(null)}>Cancelar</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={u.id}>
+                  <td>{u.nombre}</td>
+                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
+                  <td>{nombreRol(u.rolId)}</td>
+                  <td>{(u.sectores || []).length}</td>
+                  <td>{u.activo === false ? <span className="badge badge-danger">Inactivo</span> : <span className="badge badge-ok">Activo</span>}</td>
+                  <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => empezarEdicion(u)}>Editar</button>
+                    <button className={u.activo === false ? 'btn btn-primary' : 'btn btn-danger'} style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => toggleActivo(u)}>
+                      {u.activo === false ? 'Reactivar' : 'Desactivar'}
+                    </button>
+                  </td>
+                </tr>
+              )
             ))}
           </tbody>
         </table>
