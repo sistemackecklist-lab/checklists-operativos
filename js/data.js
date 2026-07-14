@@ -77,6 +77,37 @@ const Data = {
     });
   },
 
+  async actualizarRol(rolId, { nombre, descripcion, rolSuperiorId, permisos }) {
+    return db.collection('roles').doc(rolId).update({
+      nombre, descripcion, rolSuperiorId: rolSuperiorId || null,
+      permisos: permisos || {}
+    });
+  },
+
+  // Antes de borrar, verifica que ningún usuario, pregunta u otro rol
+  // dependa de este rol. Devuelve { puede: bool, motivo: string }.
+  async puedeEliminarRol(rolId) {
+    const [usuarios, subRoles, preguntasSnap] = await Promise.all([
+      this.getUsuariosPorRol(rolId),
+      this.getRolesSubordinados(rolId),
+      db.collection('preguntas').where('rolId', '==', rolId).where('activa', '==', true).get()
+    ]);
+    if (usuarios.length > 0) {
+      return { puede: false, motivo: `Hay ${usuarios.length} usuario(s) con este rol asignado.` };
+    }
+    if (subRoles.length > 0) {
+      return { puede: false, motivo: `Hay ${subRoles.length} rol(es) que reportan a este rol.` };
+    }
+    if (!preguntasSnap.empty) {
+      return { puede: false, motivo: `Hay ${preguntasSnap.size} pregunta(s) activas asociadas a este rol.` };
+    }
+    return { puede: true, motivo: '' };
+  },
+
+  async eliminarRol(rolId) {
+    return db.collection('roles').doc(rolId).delete();
+  },
+
   // ---------- SECTORES ----------
 
   async getSectores() {

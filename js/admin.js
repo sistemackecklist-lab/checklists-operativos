@@ -53,6 +53,8 @@ function AdminRoles() {
   const [rolSuperiorId, setRolSuperiorId] = React.useState('');
   const [permisos, setPermisos] = React.useState({});
   const [guardando, setGuardando] = React.useState(false);
+  const [editandoId, setEditandoId] = React.useState(null); // null = modo "crear"
+  const [error, setError] = React.useState('');
 
   async function cargar() {
     setRoles(await Data.getRoles());
@@ -63,19 +65,58 @@ function AdminRoles() {
     setPermisos(prev => ({ ...prev, [key]: !prev[key] }));
   }
 
-  async function crear() {
-    if (!nombre.trim()) return;
-    setGuardando(true);
-    await Data.crearRol({ nombre: nombre.trim(), descripcion, rolSuperiorId: rolSuperiorId || null, permisos });
+  function limpiarForm() {
     setNombre(''); setDescripcion(''); setRolSuperiorId(''); setPermisos({});
+    setEditandoId(null); setError('');
+  }
+
+  function empezarEdicion(rol) {
+    setEditandoId(rol.id);
+    setNombre(rol.nombre || '');
+    setDescripcion(rol.descripcion || '');
+    setRolSuperiorId(rol.rolSuperiorId || '');
+    setPermisos(rol.permisos || {});
+    setError('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function guardar() {
+    if (!nombre.trim()) return;
+    // Un rol no puede ser su propio superior, ni el superior de uno de sus ancestros
+    // (evita ciclos simples; validación completa de ciclos queda para una v2).
+    if (editandoId && rolSuperiorId === editandoId) {
+      setError('Un rol no puede reportar a sí mismo.');
+      return;
+    }
+    setGuardando(true);
+    if (editandoId) {
+      await Data.actualizarRol(editandoId, { nombre: nombre.trim(), descripcion, rolSuperiorId: rolSuperiorId || null, permisos });
+    } else {
+      await Data.crearRol({ nombre: nombre.trim(), descripcion, rolSuperiorId: rolSuperiorId || null, permisos });
+    }
+    limpiarForm();
     setGuardando(false);
+    cargar();
+  }
+
+  async function eliminar(rol) {
+    const chequeo = await Data.puedeEliminarRol(rol.id);
+    if (!chequeo.puede) {
+      alert(`No se puede eliminar "${rol.nombre}": ${chequeo.motivo}`);
+      return;
+    }
+    if (!confirm(`¿Eliminar el rol "${rol.nombre}"? Esta acción no se puede deshacer.`)) return;
+    await Data.eliminarRol(rol.id);
+    if (editandoId === rol.id) limpiarForm();
     cargar();
   }
 
   return (
     <div>
       <div className="card">
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 12 }}>Nuevo rol</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 12 }}>
+          {editandoId ? 'Editar rol' : 'Nuevo rol'}
+        </div>
         <div className="field">
           <label>Nombre del rol</label>
           <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Coordinador de Ventas" />
@@ -88,7 +129,7 @@ function AdminRoles() {
           <label>Reporta a (rol superior)</label>
           <select value={rolSuperiorId} onChange={e => setRolSuperiorId(e.target.value)}>
             <option value="">— Nivel más alto (sin superior) —</option>
-            {(roles || []).map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+            {(roles || []).filter(r => r.id !== editandoId).map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
           </select>
         </div>
         <div className="field">
@@ -102,15 +143,23 @@ function AdminRoles() {
             ))}
           </div>
         </div>
-        <button className="btn btn-primary" disabled={guardando || !nombre.trim()} onClick={crear}>
-          {guardando ? 'Creando…' : 'Crear rol'}
-        </button>
+
+        {error && <div className="error-text">{error}</div>}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary" disabled={guardando || !nombre.trim()} onClick={guardar}>
+            {guardando ? 'Guardando…' : (editandoId ? 'Guardar cambios' : 'Crear rol')}
+          </button>
+          {editandoId && (
+            <button className="btn btn-ghost" onClick={limpiarForm}>Cancelar edición</button>
+          )}
+        </div>
       </div>
 
       <div className="card">
         <table className="data-table">
           <thead>
-            <tr><th>Rol</th><th>Reporta a</th><th>Permisos</th></tr>
+            <tr><th>Rol</th><th>Reporta a</th><th>Permisos</th><th></th></tr>
           </thead>
           <tbody>
             {(roles || []).map(r => (
@@ -119,6 +168,10 @@ function AdminRoles() {
                 <td>{(roles.find(x => x.id === r.rolSuperiorId) || {}).nombre || '—'}</td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>
                   {Object.entries(r.permisos || {}).filter(([, v]) => v).map(([k]) => k).join(', ') || '—'}
+                </td>
+                <td style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => empezarEdicion(r)}>Editar</button>
+                  <button className="btn btn-danger" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => eliminar(r)}>Eliminar</button>
                 </td>
               </tr>
             ))}
