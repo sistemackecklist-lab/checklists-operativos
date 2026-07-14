@@ -235,37 +235,125 @@ function AdminPreguntas() {
 function AdminUsuarios() {
   const [usuarios, setUsuarios] = React.useState(null);
   const [roles, setRoles] = React.useState([]);
+  const [sectores, setSectores] = React.useState([]);
 
-  React.useEffect(() => {
-    Data.getUsuarios().then(setUsuarios);
-    Data.getRoles().then(setRoles);
-  }, []);
+  // Formulario de alta
+  const [nombre, setNombre] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [rolId, setRolId] = React.useState('');
+  const [sectoresSel, setSectoresSel] = React.useState([]);
+  const [guardando, setGuardando] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [exito, setExito] = React.useState('');
 
-  function nombreRol(rolId) {
-    return (roles.find(r => r.id === rolId) || {}).nombre || '—';
+  async function cargarTodo() {
+    const [u, r, s] = await Promise.all([Data.getUsuarios(), Data.getRoles(), Data.getSectores()]);
+    setUsuarios(u); setRoles(r); setSectores(s);
+  }
+  React.useEffect(() => { cargarTodo(); }, []);
+
+  function nombreRol(id) {
+    return (roles.find(r => r.id === id) || {}).nombre || '—';
+  }
+
+  function toggleSector(id) {
+    setSectoresSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  function limpiarForm() {
+    setNombre(''); setEmail(''); setPassword(''); setRolId(''); setSectoresSel([]);
+  }
+
+  async function crear() {
+    setError(''); setExito('');
+    if (!nombre.trim() || !email.trim() || !password || !rolId) {
+      setError('Completá nombre, email, contraseña y rol.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    setGuardando(true);
+    try {
+      await Data.crearUsuarioCompleto({ nombre, email, password, rolId, sectores: sectoresSel });
+      setExito(`Usuario "${nombre}" creado correctamente.`);
+      limpiarForm();
+      cargarTodo();
+    } catch (err) {
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Ese email ya está registrado.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('El email no es válido.');
+      } else {
+        setError('No se pudo crear el usuario: ' + err.message);
+      }
+    }
+    setGuardando(false);
   }
 
   return (
-    <div className="card">
-      <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 12 }}>
-        La creación de usuarios (email/contraseña) se hace desde la consola de Firebase
-        o un formulario de alta que use <code>createUserWithEmailAndPassword</code>.
-        Acá se listan los usuarios ya dados de alta y su rol asignado.
+    <div>
+      <div className="card">
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 12 }}>Nuevo usuario</div>
+
+        <div className="field">
+          <label>Nombre y apellido</label>
+          <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: María Fernández" />
+        </div>
+        <div className="field">
+          <label>Email (será su usuario para ingresar)</label>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="maria@empresa.com" />
+        </div>
+        <div className="field">
+          <label>Contraseña inicial</label>
+          <input type="text" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+        </div>
+        <div className="field">
+          <label>Rol</label>
+          <select value={rolId} onChange={e => setRolId(e.target.value)}>
+            <option value="">Seleccioná un rol…</option>
+            {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Sectores (opcional, puede tener varios)</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {sectores.map(s => (
+              <label key={s.id} className="checkbox-row" style={{ marginBottom: 0 }}>
+                <input type="checkbox" checked={sectoresSel.includes(s.id)} onChange={() => toggleSector(s.id)} />
+                {s.nombre}
+              </label>
+            ))}
+            {sectores.length === 0 && <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>No hay sectores cargados todavía.</span>}
+          </div>
+        </div>
+
+        {error && <div className="error-text">{error}</div>}
+        {exito && <div style={{ color: 'var(--ok)', fontSize: 13, marginBottom: 14 }}>{exito}</div>}
+
+        <button className="btn btn-primary" disabled={guardando} onClick={crear}>
+          {guardando ? 'Creando…' : 'Crear usuario'}
+        </button>
       </div>
-      <table className="data-table">
-        <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th></tr></thead>
-        <tbody>
-          {(usuarios || []).map(u => (
-            <tr key={u.id}>
-              <td>{u.nombre}</td>
-              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
-              <td>{nombreRol(u.rolId)}</td>
-              <td>{(u.sectores || []).length}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {usuarios && usuarios.length === 0 && <div className="empty-state">Todavía no hay usuarios cargados.</div>}
+
+      <div className="card">
+        <table className="data-table">
+          <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th></tr></thead>
+          <tbody>
+            {(usuarios || []).map(u => (
+              <tr key={u.id}>
+                <td>{u.nombre}</td>
+                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
+                <td>{nombreRol(u.rolId)}</td>
+                <td>{(u.sectores || []).length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {usuarios && usuarios.length === 0 && <div className="empty-state">Todavía no hay usuarios cargados.</div>}
+      </div>
     </div>
   );
 }

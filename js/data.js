@@ -19,6 +19,30 @@ const Data = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
+  // Crea el login (Firebase Auth) y el perfil (Firestore) de un usuario
+  // nuevo en un solo paso, usando la instancia secundaria de Firebase
+  // para no afectar la sesión del Admin que lo está creando.
+  async crearUsuarioCompleto({ nombre, email, password, rolId, sectores }) {
+    const authSecundaria = getAuthSecundaria();
+    const cred = await authSecundaria.createUserWithEmailAndPassword(email.trim(), password);
+    const uid = cred.user.uid;
+
+    // Cerramos la sesión de la instancia secundaria: ya cumplió su
+    // propósito (crear las credenciales) y no la necesitamos más.
+    await authSecundaria.signOut();
+
+    await db.collection('usuarios').doc(uid).set({
+      nombre: nombre.trim(),
+      email: email.trim(),
+      rolId,
+      sectores: sectores || [],
+      activo: true,
+      creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    return uid;
+  },
+
   async getUsuariosPorRol(rolId) {
     const snap = await db.collection('usuarios')
       .where('rolId', '==', rolId)
