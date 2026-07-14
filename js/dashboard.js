@@ -24,6 +24,7 @@ function DashboardScreen({ usuario }) {
       try {
         setResueltas(await Data.getAccionesResueltas());
       } catch (err) {
+        console.error('Error cargando historial de acciones resueltas:', err);
         setErrorHistorial('No se pudo cargar el historial (probablemente falte crear un índice en Firestore — revisá la consola, F12, para el link de creación).');
       }
     }

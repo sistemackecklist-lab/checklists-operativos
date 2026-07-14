@@ -197,6 +197,7 @@ function AdminSectores() {
     try {
       setSectores(await Data.getSectores());
     } catch (err) {
+      console.error('Error cargando sectores:', err);
       setError(
         err.code === 'failed-precondition'
           ? 'Falta crear un índice en Firestore para esta consulta. Mirá la consola (F12) — el error trae un link para crearlo con un clic.'
