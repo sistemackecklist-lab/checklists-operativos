@@ -1,15 +1,11 @@
 /* ============================================================
    FIREBASE CONFIG
    ------------------------------------------------------------
-   1. Andá a https://console.firebase.google.com
-   2. Creá un proyecto nuevo (ej: "checklists-operativos")
-   3. Dentro del proyecto: ⚙️ Configuración del proyecto → General
-      → "Tus apps" → ícono </> (Web) → registrar app
-   4. Copiá el objeto firebaseConfig que te da Firebase y
-      reemplazá los valores de abajo por los tuyos.
+   Ya contiene las credenciales reales del proyecto
+   "checklists-operativos". No hace falta tocar este archivo
+   salvo que cambien de proyecto de Firebase.
    ============================================================ */
 
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyBS9fY8txtO_TFhlhhTj4KfImCUu65cLJo",
   authDomain: "checklists-operativos.firebaseapp.com",
