@@ -83,9 +83,38 @@ const Data = {
   },
 
   // Usuarios que reportan a un rol (los que tienen rolSuperiorId === rolId)
+  // Solo trae el nivel inmediato — se usa para validaciones puntuales
+  // (ej. "¿puedo borrar este rol?"). Para reportes jerárquicos completos
+  // usar getRolesDescendientes.
   async getRolesSubordinados(rolId) {
     const snap = await db.collection('roles').where('rolSuperiorId', '==', rolId).get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Trae TODOS los roles que están por debajo de rolId en el árbol,
+  // sin importar cuántos niveles de profundidad haya (hijos, nietos,
+  // bisnietos...). Esto es lo que se necesita para que un supervisor
+  // vea los checklists de TODA su cadena de mando, no solo del nivel
+  // inmediato de abajo.
+  async getRolesDescendientes(rolId) {
+    const todos = [];
+    let nivelActual = [rolId];
+
+    // Recorre nivel por nivel hasta que no queden más hijos.
+    // El límite de 10 niveles es solo una salvaguarda contra un
+    // ciclo accidental en los datos (un rol que termine apuntando
+    // a sí mismo indirectamente); una jerarquía normal de tienda
+    // no debería tener más de 4 o 5 niveles.
+    for (let i = 0; i < 10 && nivelActual.length > 0; i++) {
+      const hijosPorNivel = await Promise.all(
+        nivelActual.map(id => this.getRolesSubordinados(id))
+      );
+      const hijos = hijosPorNivel.flat();
+      if (hijos.length === 0) break;
+      todos.push(...hijos);
+      nivelActual = hijos.map(r => r.id);
+    }
+    return todos;
   },
 
   async crearRol({ nombre, descripcion, rolSuperiorId, permisos }) {

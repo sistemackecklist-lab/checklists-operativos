@@ -39,7 +39,7 @@ function DashboardScreen({ usuario }) {
     async function cargar() {
       const [pend, subRoles] = await Promise.all([
         Data.getAccionesPendientes(),
-        Data.getRolesSubordinados(usuario.rolId)
+        Data.getRolesDescendientes(usuario.rolId)
       ]);
       setAcciones(pend);
 
