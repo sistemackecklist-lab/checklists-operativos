@@ -234,6 +234,8 @@ const Data = {
         checklistInstanciaId: ref.id,
         usuarioId: usuario.id,
         usuarioNombre: usuario.nombre,
+        rolId: usuario.rolId,
+        sectorId: sectorId || null,
         preguntaTexto: r.textoPregunta,
         motivoInformado: r.motivo,
         fecha,
@@ -279,6 +281,17 @@ const Data = {
       .where('resuelto', '==', true)
       .orderBy('resueltoEn', 'desc')
       .limit(limite)
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  // Trae TODAS las acciones (resueltas o no) dentro de un rango de fechas
+  // (formato YYYY-MM-DD), para armar métricas y gráficos. Es una consulta
+  // de rango sobre un solo campo, no necesita índice compuesto.
+  async getAccionesEnRango(desde, hasta) {
+    const snap = await db.collection('acciones_correctivas')
+      .where('fecha', '>=', desde)
+      .where('fecha', '<=', hasta)
       .get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },

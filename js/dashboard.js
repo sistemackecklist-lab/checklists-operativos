@@ -1,7 +1,33 @@
 /* ============================================================
    PANEL — vista para supervisores: acciones correctivas
-   pendientes (los "No" sin resolver) + métricas básicas.
+   pendientes (los "No" sin resolver), historial, y métricas
+   de cumplimiento con gráficos por fecha y por sector.
    ============================================================ */
+
+// Convierte un Timestamp de Firestore (o Date) a "dd/mm HH:mm"
+function formatFechaHora(ts) {
+  if (!ts) return '—';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Duración legible entre dos Timestamps de Firestore (o Date)
+function formatDuracion(desdeTs, hastaTs) {
+  if (!desdeTs || !hastaTs) return '—';
+  const desde = desdeTs.toDate ? desdeTs.toDate() : new Date(desdeTs);
+  const hasta = hastaTs.toDate ? hastaTs.toDate() : new Date(hastaTs);
+  const ms = hasta - desde;
+  if (ms < 0) return '—';
+  const minutos = Math.round(ms / 60000);
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const minRestantes = minutos % 60;
+  if (horas < 24) return `${horas} h ${minRestantes} min`;
+  const dias = Math.floor(horas / 24);
+  const horasRestantes = horas % 24;
+  return `${dias} d ${horasRestantes} h`;
+}
 
 function DashboardScreen({ usuario }) {
   const [acciones, setAcciones] = React.useState(null);
@@ -106,9 +132,201 @@ function DashboardScreen({ usuario }) {
               {a.observacionSupervisor && <div style={{ marginTop: 4 }}><strong style={{ color: 'var(--text)' }}>Observación:</strong> {a.observacionSupervisor}</div>}
               {a.accionRealizada && <div style={{ marginTop: 4 }}><strong style={{ color: 'var(--text)' }}>Acción realizada:</strong> {a.accionRealizada}</div>}
             </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)', marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span>Reportado: {formatFechaHora(a.creadoEn)}</span>
+              <span>Resuelto: {formatFechaHora(a.resueltoEn)}</span>
+              <span style={{ color: 'var(--accent)' }}>Tiempo de atención: {formatDuracion(a.creadoEn, a.resueltoEn)}</span>
+            </div>
           </div>
         ))}
       </div>
+
+      <MetricasScreen />
+    </div>
+  );
+}
+
+/* ---------------- MÉTRICAS: gráficos por fecha y por sector ---------------- */
+
+function MetricasScreen() {
+  const hoy = Data.getFechaHoy();
+  const hace30dias = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const [desde, setDesde] = React.useState(hace30dias);
+  const [hasta, setHasta] = React.useState(hoy);
+  const [datos, setDatos] = React.useState(null);
+  const [sectores, setSectores] = React.useState([]);
+  const [error, setError] = React.useState('');
+
+  const canvasDiaRef = React.useRef(null);
+  const canvasSectorRef = React.useRef(null);
+  const chartDiaRef = React.useRef(null);
+  const chartSectorRef = React.useRef(null);
+
+  React.useEffect(() => { Data.getSectores().then(setSectores); }, []);
+
+  async function cargar() {
+    setError('');
+    setDatos(null);
+    try {
+      const acciones = await Data.getAccionesEnRango(desde, hasta);
+      setDatos(acciones);
+    } catch (err) {
+      console.error('Error cargando métricas:', err);
+      setError('No se pudieron cargar las métricas para ese rango.');
+    }
+  }
+  React.useEffect(() => { cargar(); }, [desde, hasta]);
+
+  function nombreSector(id) {
+    return (sectores.find(s => s.id === id) || {}).nombre || 'Sin sector';
+  }
+
+  // ---- Armar los datasets para los gráficos ----
+  React.useEffect(() => {
+    if (!datos || !window.Chart) return;
+
+    // Por día: cantidad de casos reportados por fecha
+    const porDia = {};
+    datos.forEach(a => { porDia[a.fecha] = (porDia[a.fecha] || 0) + 1; });
+    const fechasOrdenadas = Object.keys(porDia).sort();
+
+    // Por sector: cantidad de casos por sector
+    const porSector = {};
+    datos.forEach(a => {
+      const s = nombreSector(a.sectorId);
+      porSector[s] = (porSector[s] || 0) + 1;
+    });
+
+    if (chartDiaRef.current) chartDiaRef.current.destroy();
+    if (chartSectorRef.current) chartSectorRef.current.destroy();
+
+    if (canvasDiaRef.current) {
+      chartDiaRef.current = new Chart(canvasDiaRef.current, {
+        type: 'bar',
+        data: {
+          labels: fechasOrdenadas,
+          datasets: [{
+            label: 'Casos reportados',
+            data: fechasOrdenadas.map(f => porDia[f]),
+            backgroundColor: '#E8A33D'
+          }]
+        },
+        options: chartOptionsBase()
+      });
+    }
+
+    if (canvasSectorRef.current) {
+      chartSectorRef.current = new Chart(canvasSectorRef.current, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(porSector),
+          datasets: [{
+            label: 'Casos por sector',
+            data: Object.values(porSector),
+            backgroundColor: '#4C8BF5'
+          }]
+        },
+        options: { ...chartOptionsBase(), indexAxis: 'y' }
+      });
+    }
+  }, [datos, sectores]);
+
+  function chartOptionsBase() {
+    return {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#9AA3B0', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#2E3542' } },
+        y: { ticks: { color: '#9AA3B0', font: { family: 'JetBrains Mono', size: 10 }, precision: 0 }, grid: { color: '#2E3542' } }
+      }
+    };
+  }
+
+  // ---- Tiempo promedio de atención (solo casos resueltos en el rango) ----
+  const resueltosEnRango = (datos || []).filter(a => a.resuelto && a.creadoEn && a.resueltoEn);
+  const promedioMin = resueltosEnRango.length
+    ? Math.round(resueltosEnRango.reduce((acc, a) => {
+        const desdeD = a.creadoEn.toDate ? a.creadoEn.toDate() : new Date(a.creadoEn);
+        const hastaD = a.resueltoEn.toDate ? a.resueltoEn.toDate() : new Date(a.resueltoEn);
+        return acc + (hastaD - desdeD) / 60000;
+      }, 0) / resueltosEnRango.length)
+    : null;
+
+  function formatPromedio(min) {
+    if (min === null) return '—';
+    if (min < 60) return `${min} min`;
+    const horas = Math.floor(min / 60);
+    const minRest = Math.round(min % 60);
+    if (horas < 24) return `${horas} h ${minRest} min`;
+    const dias = Math.floor(horas / 24);
+    return `${dias} d ${horas % 24} h`;
+  }
+
+  return (
+    <div className="card">
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 4 }}>
+        Métricas de cumplimiento
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 16 }}>
+        Casos reportados y tiempos de atención en el rango seleccionado.
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Desde</label>
+          <input type="date" value={desde} onChange={e => setDesde(e.target.value)} />
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Hasta</label>
+          <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn btn-ghost" onClick={() => { const h = Data.getFechaHoy(); setDesde(h); setHasta(h); }}>Hoy</button>
+          <button className="btn btn-ghost" onClick={() => { setDesde(hace30dias); setHasta(hoy); }}>Últimos 30 días</button>
+        </div>
+      </div>
+
+      {error && <div className="error-text">{error}</div>}
+      {datos === null && !error && <div className="spinner-row">Cargando…</div>}
+
+      {datos && (
+        <>
+          <div className="stat-grid" style={{ marginBottom: 20 }}>
+            <div className="stat-tile">
+              <div className="stat-value" style={{ color: 'var(--accent)' }}>{datos.length}</div>
+              <div className="stat-label">Casos reportados</div>
+            </div>
+            <div className="stat-tile">
+              <div className="stat-value" style={{ color: 'var(--ok)' }}>{datos.filter(a => a.resuelto).length}</div>
+              <div className="stat-label">Resueltos en el rango</div>
+            </div>
+            <div className="stat-tile">
+              <div className="stat-value" style={{ color: 'var(--info)' }}>{formatPromedio(promedioMin)}</div>
+              <div className="stat-label">Tiempo promedio de atención</div>
+            </div>
+          </div>
+
+          {datos.length === 0 ? (
+            <div className="empty-state">No hay casos reportados en este rango de fechas.</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Por fecha</div>
+                <canvas ref={canvasDiaRef} height="180"></canvas>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Por sector</div>
+                <canvas ref={canvasSectorRef} height="180"></canvas>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -127,7 +345,9 @@ function AccionCorrectivaRow({ accion, onResuelto }) {
     };
     await Data.resolverAccion(accion.id, datos);
     setGuardando(false);
-    onResuelto({ ...accion, ...datos, resuelto: true });
+    // resueltoEn real queda en el server; usamos "ahora" como aproximación
+    // para que el historial muestre el tiempo de atención sin esperar a recargar.
+    onResuelto({ ...accion, ...datos, resuelto: true, resueltoEn: new Date() });
   }
 
   return (
@@ -137,7 +357,7 @@ function AccionCorrectivaRow({ accion, onResuelto }) {
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{accion.preguntaTexto}</div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {accion.usuarioNombre} · {accion.fecha}
+            {accion.usuarioNombre} · Reportado {formatFechaHora(accion.creadoEn)}
           </div>
         </div>
         <span className="badge badge-danger">NO</span>
