@@ -222,6 +222,20 @@ const Data = {
     });
   },
 
+  // Preguntas de un rol creadas ANTES de que existiera el campo sectorId
+  // (por eso el campo directamente no existe en el documento, no es que
+  // valga null). Sirve para migrarlas una vez a un sector concreto.
+  async getPreguntasSinSector(rolId) {
+    const snap = await db.collection('preguntas').where('rolId', '==', rolId).get();
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(p => p.sectorId === undefined);
+  },
+
+  async asignarSectorAPregunta(preguntaId, sectorId) {
+    return db.collection('preguntas').doc(preguntaId).update({ sectorId: sectorId || null });
+  },
+
   async desactivarPregunta(preguntaId) {
     return db.collection('preguntas').doc(preguntaId).update({ activa: false });
   },

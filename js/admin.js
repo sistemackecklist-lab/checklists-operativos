@@ -287,6 +287,9 @@ function AdminPreguntas() {
   const [preguntas, setPreguntas] = React.useState(null);
   const [texto, setTexto] = React.useState('');
 
+  const [sinSector, setSinSector] = React.useState(null);
+  const [asignando, setAsignando] = React.useState({}); // { preguntaId: sectorIdElegido }
+
   React.useEffect(() => {
     Data.getRoles().then(setRoles);
     Data.getSectores().then(setSectores);
@@ -297,8 +300,21 @@ function AdminPreguntas() {
     setPreguntas(await Data.getPreguntasAdmin(rid, sid === 'general' ? null : sid));
   }
 
-  React.useEffect(() => { setSectorId(''); }, [rolId]);
+  async function cargarSinSector(rid) {
+    if (!rid) { setSinSector(null); return; }
+    setSinSector(await Data.getPreguntasSinSector(rid));
+  }
+
+  React.useEffect(() => { setSectorId(''); cargarSinSector(rolId); }, [rolId]);
   React.useEffect(() => { cargarPreguntas(rolId, sectorId); }, [rolId, sectorId]);
+
+  async function migrarPregunta(preguntaId) {
+    const destino = asignando[preguntaId];
+    if (!destino) return;
+    await Data.asignarSectorAPregunta(preguntaId, destino === 'general' ? null : destino);
+    await cargarSinSector(rolId);
+    if (sectorId) cargarPreguntas(rolId, sectorId);
+  }
 
   async function agregar() {
     if (!texto.trim() || !rolId || !sectorId) return;
@@ -343,6 +359,37 @@ function AdminPreguntas() {
           </div>
         )}
       </div>
+
+      {rolId && sinSector && sinSector.length > 0 && (
+        <div className="card" style={{ borderColor: 'var(--accent)' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 4, color: 'var(--accent)' }}>
+            ⚠️ Preguntas antiguas de este rol sin sector asignado
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 14 }}>
+            Estas preguntas se cargaron antes de que existiera la separación por sector, por eso no
+            aparecen en ningún checklist ahora. Elegí a qué sector pertenece cada una (o "General" si
+            no es específica de un sector) para que vuelvan a estar activas.
+          </div>
+          {sinSector.map(p => (
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
+              <span style={{ flex: 1 }}>{p.texto}</span>
+              <select
+                value={asignando[p.id] || ''}
+                onChange={e => setAsignando(prev => ({ ...prev, [p.id]: e.target.value }))}
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}
+              >
+                <option value="">Asignar a…</option>
+                {sectores.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                <option value="general">General (sin sector)</option>
+              </select>
+              <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }}
+                      disabled={!asignando[p.id]} onClick={() => migrarPregunta(p.id)}>
+                Asignar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {rolId && sectorId && (
         <div className="card">
@@ -538,33 +585,47 @@ function AdminUsuarios() {
             {(usuarios || []).map(u => (
               editandoId === u.id ? (
                 <tr key={u.id}>
-                  <td><input value={editNombre} onChange={e => setEditNombre(e.target.value)} style={{ width: '100%', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }} /></td>
-                  <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{u.email}</td>
-                  <td>
-                    <select value={editRolId} onChange={e => setEditRolId(e.target.value)} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}>
-                      {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {sectores.map(s => (
-                        <label key={s.id} style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center' }}>
-                          <input type="checkbox" checked={editSectores.includes(s.id)} onChange={() => toggleSectorEdit(s.id)} />
-                          {s.nombre}
-                        </label>
-                      ))}
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <div style={{ padding: '18px 4px', background: 'var(--surface-2)', borderRadius: 'var(--radius-sm)', margin: '6px 0' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px', marginBottom: 14 }}>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label>Nombre y apellido</label>
+                          <input value={editNombre} onChange={e => setEditNombre(e.target.value)} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label>Email</label>
+                          <input value={u.email} disabled style={{ opacity: 0.6 }} />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label>Rol</label>
+                          <select value={editRolId} onChange={e => setEditRolId(e.target.value)}>
+                            {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+                          </select>
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label>Sectores</label>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                            {sectores.map(s => (
+                              <label key={s.id} style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <input type="checkbox" checked={editSectores.includes(s.id)} onChange={() => toggleSectorEdit(s.id)} />
+                                {s.nombre}
+                              </label>
+                            ))}
+                            {sectores.length === 0 && <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>No hay sectores cargados.</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <label className="checkbox-row" style={{ marginBottom: 16 }}>
+                        <input type="checkbox" checked={editVerPanelCompleto} onChange={e => setEditVerPanelCompleto(e.target.checked)} />
+                        Puede ver el Panel de todo su equipo (no solo su propio historial)
+                      </label>
+
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-primary" onClick={() => guardarEdicion(u.id)}>Guardar</button>
+                        <button className="btn btn-ghost" onClick={() => setEditandoId(null)}>Cancelar</button>
+                      </div>
                     </div>
-                  </td>
-                  <td>
-                    <label style={{ fontSize: 11, display: 'flex', gap: 4, alignItems: 'center', maxWidth: 110 }}>
-                      <input type="checkbox" checked={editVerPanelCompleto} onChange={e => setEditVerPanelCompleto(e.target.checked)} />
-                      Ve todo el equipo
-                    </label>
-                  </td>
-                  <td>{u.activo === false ? <span className="badge badge-danger">Inactivo</span> : <span className="badge badge-ok">Activo</span>}</td>
-                  <td style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => guardarEdicion(u.id)}>Guardar</button>
-                    <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setEditandoId(null)}>Cancelar</button>
                   </td>
                 </tr>
               ) : (
