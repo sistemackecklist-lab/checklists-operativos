@@ -435,6 +435,11 @@ function AdminUsuarios() {
   const [editSectores, setEditSectores] = React.useState([]);
   const [editVerPanelCompleto, setEditVerPanelCompleto] = React.useState(true);
 
+  // Filtros de la tabla
+  const [filtroTexto, setFiltroTexto] = React.useState('');
+  const [filtroRol, setFiltroRol] = React.useState('');
+  const [filtroEstado, setFiltroEstado] = React.useState('activos'); // activos | inactivos | todos
+
   // Cada consulta se carga por separado: si una falla (ej. falta un
   // índice en Firestore), no tumba a las demás.
   async function cargarTodo() {
@@ -456,6 +461,18 @@ function AdminUsuarios() {
   function nombreRol(id) {
     return (roles.find(r => r.id === id) || {}).nombre || '—';
   }
+
+  const usuariosFiltrados = (usuarios || []).filter(u => {
+    if (filtroEstado === 'activos' && u.activo === false) return false;
+    if (filtroEstado === 'inactivos' && u.activo !== false) return false;
+    if (filtroRol && u.rolId !== filtroRol) return false;
+    if (filtroTexto.trim()) {
+      const q = filtroTexto.trim().toLowerCase();
+      const coincide = (u.nombre || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+      if (!coincide) return false;
+    }
+    return true;
+  });
 
   function toggleSector(id) {
     setSectoresSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -578,11 +595,41 @@ function AdminUsuarios() {
 
       {errorCarga && <div className="card" style={{ borderColor: 'var(--danger)' }}><span className="error-text" style={{ margin: 0 }}>{errorCarga}</span></div>}
 
+      <div className="card" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="field" style={{ margin: 0, flex: '1 1 220px' }}>
+          <label>Buscar</label>
+          <input value={filtroTexto} onChange={e => setFiltroTexto(e.target.value)} placeholder="Nombre o email…" />
+        </div>
+        <div className="field" style={{ margin: 0, flex: '1 1 180px' }}>
+          <label>Rol</label>
+          <select value={filtroRol} onChange={e => setFiltroRol(e.target.value)}>
+            <option value="">Todos los roles</option>
+            {roles.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ margin: 0, flex: '1 1 160px' }}>
+          <label>Estado</label>
+          <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+            <option value="activos">Solo activos</option>
+            <option value="inactivos">Solo inactivos</option>
+            <option value="todos">Todos</option>
+          </select>
+        </div>
+        {(filtroTexto || filtroRol || filtroEstado !== 'activos') && (
+          <button className="btn btn-ghost" onClick={() => { setFiltroTexto(''); setFiltroRol(''); setFiltroEstado('activos'); }}>
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
       <div className="card">
+        <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 10 }}>
+          Mostrando {usuariosFiltrados.length} de {(usuarios || []).length} usuarios
+        </div>
         <table className="data-table">
           <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sectores</th><th>Panel</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {(usuarios || []).map(u => (
+            {usuariosFiltrados.map(u => (
               editandoId === u.id ? (
                 <tr key={u.id}>
                   <td colSpan={7} style={{ padding: 0 }}>
@@ -652,6 +699,9 @@ function AdminUsuarios() {
           </tbody>
         </table>
         {usuarios && usuarios.length === 0 && <div className="empty-state">Todavía no hay usuarios cargados.</div>}
+        {usuarios && usuarios.length > 0 && usuariosFiltrados.length === 0 && (
+          <div className="empty-state">Ningún usuario coincide con los filtros aplicados.</div>
+        )}
       </div>
     </div>
   );
