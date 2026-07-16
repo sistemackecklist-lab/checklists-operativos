@@ -289,6 +289,8 @@ function AdminPreguntas() {
 
   const [sinSector, setSinSector] = React.useState(null);
   const [asignando, setAsignando] = React.useState({}); // { preguntaId: sectorIdElegido }
+  const [replicando, setReplicando] = React.useState(null); // id de la pregunta que se está replicando
+  const [mensajeReplicado, setMensajeReplicado] = React.useState('');
 
   React.useEffect(() => {
     Data.getRoles().then(setRoles);
@@ -306,7 +308,7 @@ function AdminPreguntas() {
   }
 
   React.useEffect(() => { setSectorId(''); cargarSinSector(rolId); }, [rolId]);
-  React.useEffect(() => { cargarPreguntas(rolId, sectorId); }, [rolId, sectorId]);
+  React.useEffect(() => { cargarPreguntas(rolId, sectorId); setMensajeReplicado(''); }, [rolId, sectorId]);
 
   async function migrarPregunta(preguntaId) {
     const destino = asignando[preguntaId];
@@ -326,6 +328,21 @@ function AdminPreguntas() {
 
   async function desactivar(id) {
     await Data.desactivarPregunta(id);
+    cargarPreguntas(rolId, sectorId);
+  }
+
+  async function replicar(pregunta) {
+    setReplicando(pregunta.id);
+    setMensajeReplicado('');
+    const sectorIds = sectores.map(s => s.id);
+    const { creadas, saltadas } = await Data.replicarPreguntaATodosLosSectores(pregunta, sectorIds);
+    setReplicando(null);
+    setMensajeReplicado(
+      creadas > 0
+        ? `Replicada a ${creadas} sector${creadas === 1 ? '' : 'es'} nuevo${creadas === 1 ? '' : 's'}` +
+          (saltadas > 0 ? ` (ya existía en ${saltadas}).` : '.')
+        : `Ya existía en todos los sectores, no se creó ninguna copia nueva.`
+    );
     cargarPreguntas(rolId, sectorId);
   }
 
@@ -393,10 +410,18 @@ function AdminPreguntas() {
 
       {rolId && sectorId && (
         <div className="card">
+          {mensajeReplicado && (
+            <div style={{ color: 'var(--ok)', fontSize: 13, marginBottom: 12 }}>{mensajeReplicado}</div>
+          )}
           {preguntas === null && <div className="spinner-row">Cargando…</div>}
           {preguntas && preguntas.filter(p => p.activa).map(p => (
-            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
-              <span>{p.texto}</span>
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
+              <span style={{ flex: 1 }}>{p.texto}</span>
+              <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
+                      disabled={replicando === p.id} onClick={() => replicar(p)}
+                      title="Crea esta misma pregunta en los demás sectores de este rol (si todavía no la tienen)">
+                {replicando === p.id ? 'Replicando…' : '⧉ Replicar a todos los sectores'}
+              </button>
               <button className="btn btn-ghost" onClick={() => desactivar(p.id)}>Desactivar</button>
             </div>
           ))}

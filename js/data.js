@@ -222,6 +222,36 @@ const Data = {
     });
   },
 
+  // Copia una pregunta a todos los demás sectores del mismo rol (incluido
+  // "General", sectorId null), salteando los sectores donde ya exista una
+  // pregunta activa con el mismo texto para no duplicar.
+  // Devuelve { creadas, saltadas } para poder informarle al usuario qué pasó.
+  async replicarPreguntaATodosLosSectores(pregunta, todosLosSectorIds) {
+    const destinos = [null, ...todosLosSectorIds].filter(sid => sid !== (pregunta.sectorId || null));
+
+    const existentesPorSector = await Promise.all(
+      destinos.map(sid => this.getPreguntasAdmin(pregunta.rolId, sid))
+    );
+
+    let creadas = 0, saltadas = 0;
+    const textoNormalizado = pregunta.texto.trim().toLowerCase();
+
+    for (let i = 0; i < destinos.length; i++) {
+      const yaExiste = existentesPorSector[i].some(
+        p => p.activa && p.texto.trim().toLowerCase() === textoNormalizado
+      );
+      if (yaExiste) { saltadas++; continue; }
+      await this.crearPregunta({
+        rolId: pregunta.rolId,
+        sectorId: destinos[i],
+        texto: pregunta.texto,
+        orden: existentesPorSector[i].length
+      });
+      creadas++;
+    }
+    return { creadas, saltadas };
+  },
+
   // Preguntas de un rol creadas ANTES de que existiera el campo sectorId
   // (por eso el campo directamente no existe en el documento, no es que
   // valga null). Sirve para migrarlas una vez a un sector concreto.
