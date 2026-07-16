@@ -291,6 +291,10 @@ function AdminPreguntas() {
   const [asignando, setAsignando] = React.useState({}); // { preguntaId: sectorIdElegido }
   const [replicando, setReplicando] = React.useState(null); // id de la pregunta que se está replicando
   const [mensajeReplicado, setMensajeReplicado] = React.useState('');
+  const [preguntasDelRol, setPreguntasDelRol] = React.useState([]); // todas las activas del rol, en cualquier sector
+  // Guardia inmediata (no depende de que React vuelva a renderizar) para
+  // que un doble clic muy rápido en "Replicar" no dispare dos copias.
+  const replicandoRef = React.useRef(new Set());
 
   React.useEffect(() => {
     Data.getRoles().then(setRoles);
@@ -302,13 +306,31 @@ function AdminPreguntas() {
     setPreguntas(await Data.getPreguntasAdmin(rid, sid === 'general' ? null : sid));
   }
 
+  async function cargarPreguntasDelRol(rid) {
+    if (!rid) { setPreguntasDelRol([]); return; }
+    setPreguntasDelRol(await Data.getPreguntasActivasPorRol(rid));
+  }
+
   async function cargarSinSector(rid) {
     if (!rid) { setSinSector(null); return; }
     setSinSector(await Data.getPreguntasSinSector(rid));
   }
 
-  React.useEffect(() => { setSectorId(''); cargarSinSector(rolId); }, [rolId]);
+  React.useEffect(() => { setSectorId(''); cargarSinSector(rolId); cargarPreguntasDelRol(rolId); }, [rolId]);
   React.useEffect(() => { cargarPreguntas(rolId, sectorId); setMensajeReplicado(''); }, [rolId, sectorId]);
+
+  // Cuántos sectores distintos (contando "General") ya tienen una pregunta
+  // ACTIVA con este mismo texto, dentro del mismo rol.
+  function sectoresConEstaPregunta(texto) {
+    const normalizado = texto.trim().toLowerCase();
+    const claves = new Set(
+      preguntasDelRol
+        .filter(p => p.texto.trim().toLowerCase() === normalizado)
+        .map(p => p.sectorId || 'general')
+    );
+    return claves;
+  }
+  const totalSectoresPosibles = sectores.length + 1; // + "General"
 
   async function migrarPregunta(preguntaId) {
     const destino = asignando[preguntaId];
@@ -332,18 +354,25 @@ function AdminPreguntas() {
   }
 
   async function replicar(pregunta) {
+    if (replicandoRef.current.has(pregunta.id)) return; // ya hay una replicación de esta pregunta en curso
+    replicandoRef.current.add(pregunta.id);
     setReplicando(pregunta.id);
     setMensajeReplicado('');
-    const sectorIds = sectores.map(s => s.id);
-    const { creadas, saltadas } = await Data.replicarPreguntaATodosLosSectores(pregunta, sectorIds);
-    setReplicando(null);
-    setMensajeReplicado(
-      creadas > 0
-        ? `Replicada a ${creadas} sector${creadas === 1 ? '' : 'es'} nuevo${creadas === 1 ? '' : 's'}` +
-          (saltadas > 0 ? ` (ya existía en ${saltadas}).` : '.')
-        : `Ya existía en todos los sectores, no se creó ninguna copia nueva.`
-    );
-    cargarPreguntas(rolId, sectorId);
+    try {
+      const sectorIds = sectores.map(s => s.id);
+      const { creadas, saltadas } = await Data.replicarPreguntaATodosLosSectores(pregunta, sectorIds);
+      setMensajeReplicado(
+        creadas > 0
+          ? `Replicada a ${creadas} sector${creadas === 1 ? '' : 'es'} nuevo${creadas === 1 ? '' : 's'}` +
+            (saltadas > 0 ? ` (ya existía en ${saltadas}).` : '.')
+          : `Ya existía en todos los sectores, no se creó ninguna copia nueva.`
+      );
+      cargarPreguntas(rolId, sectorId);
+      cargarPreguntasDelRol(rolId);
+    } finally {
+      replicandoRef.current.delete(pregunta.id);
+      setReplicando(null);
+    }
   }
 
   return (
@@ -414,17 +443,32 @@ function AdminPreguntas() {
             <div style={{ color: 'var(--ok)', fontSize: 13, marginBottom: 12 }}>{mensajeReplicado}</div>
           )}
           {preguntas === null && <div className="spinner-row">Cargando…</div>}
-          {preguntas && preguntas.filter(p => p.activa).map(p => (
-            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
-              <span style={{ flex: 1 }}>{p.texto}</span>
-              <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
-                      disabled={replicando === p.id} onClick={() => replicar(p)}
-                      title="Crea esta misma pregunta en los demás sectores de este rol (si todavía no la tienen)">
-                {replicando === p.id ? 'Replicando…' : '⧉ Replicar a todos los sectores'}
-              </button>
-              <button className="btn btn-ghost" onClick={() => desactivar(p.id)}>Desactivar</button>
-            </div>
-          ))}
+          {preguntas && preguntas.filter(p => p.activa).map(p => {
+            const enSectores = sectoresConEstaPregunta(p.texto);
+            const enTodos = enSectores.size >= totalSectoresPosibles;
+            return (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
+                <div style={{ flex: 1 }}>
+                  <div>{p.texto}</div>
+                  {enTodos ? (
+                    <span className="badge badge-ok" style={{ marginTop: 4 }}>✓ Replicada en todos los sectores</span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                      En {enSectores.size} de {totalSectoresPosibles} sectores
+                    </span>
+                  )}
+                </div>
+                {!enTodos && (
+                  <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
+                          disabled={replicando === p.id} onClick={() => replicar(p)}
+                          title="Crea esta misma pregunta en los demás sectores de este rol (si todavía no la tienen)">
+                    {replicando === p.id ? 'Replicando…' : '⧉ Replicar a todos los sectores'}
+                  </button>
+                )}
+                <button className="btn btn-ghost" onClick={() => desactivar(p.id)}>Desactivar</button>
+              </div>
+            );
+          })}
           {preguntas && preguntas.filter(p => p.activa).length === 0 && (
             <div className="empty-state">Este rol todavía no tiene preguntas activas para este sector.</div>
           )}

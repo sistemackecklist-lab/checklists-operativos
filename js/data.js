@@ -215,6 +215,16 @@ const Data = {
       .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   },
 
+  // Todas las preguntas ACTIVAS de un rol, en cualquier sector. Sirve para
+  // calcular en cuántos sectores ya está replicada cada pregunta.
+  async getPreguntasActivasPorRol(rolId) {
+    const snap = await db.collection('preguntas')
+      .where('rolId', '==', rolId)
+      .where('activa', '==', true)
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
   async crearPregunta({ rolId, sectorId, texto, orden }) {
     return db.collection('preguntas').add({
       rolId, sectorId: sectorId || null, texto, orden: orden || 0, activa: true,

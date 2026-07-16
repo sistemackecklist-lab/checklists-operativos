@@ -78,14 +78,24 @@ duplicar todos los roles y preguntas.
 
 ## 7. Cargar el resto de los usuarios
 
-Por ahora la creación de usuarios operativos (Coordinadores, Gerentes, etc.)
-se hace igual que el Admin: **Authentication → Add user** + crear su
-documento correspondiente en `usuarios` con el `rolId` que le toque
-(tomalo de la colección `roles` en Firestore) y sus `sectores`.
+A diferencia del Admin (que se crea manualmente una única vez, paso 5),
+el resto de los usuarios se cargan **desde la propia app**:
 
-> Más adelante se puede armar una pantalla de alta de usuarios dentro de
-> **Administración** que llame a `createUserWithEmailAndPassword` — hoy
-> el proyecto ya trae la sección de Administración lista para ese agregado.
+1. Logueate como Admin.
+2. Andá a **Administración → Usuarios**.
+3. Completá nombre, email, contraseña inicial, rol y sectores, y hacé clic
+   en **"Crear usuario"**.
+
+Esto crea automáticamente el login (Firebase Auth) y el perfil
+(Firestore) en un solo paso, sin pasar por la consola de Firebase.
+
+> Detalle técnico: el formulario usa una **instancia secundaria de
+> Firebase** (ver `js/firebase-config.js`, función `getAuthSecundaria`)
+> exclusivamente para crear la credencial nueva. Esto evita el
+> comportamiento por defecto de Firebase Auth en el navegador, donde
+> crear un usuario nuevo cambia automáticamente la sesión activa hacia
+> ese usuario — así el Admin nunca pierde su propia sesión al dar de
+> alta a otra persona.
 
 ## 8. Publicar en GitHub Pages
 
@@ -130,13 +140,56 @@ esté validado en uso real; el modelo de datos (`data.js`, colección
 
 ---
 
+## 11. La app ahora es instalable (PWA)
+
+Una vez publicada en GitHub Pages con HTTPS (ya lo tenés resuelto), cualquier
+usuario puede "instalarla" como si fuera una app nativa:
+
+- **Android (Chrome)**: al entrar a la URL, aparece un banner o el menú
+  (⋮) tiene la opción **"Instalar aplicación"** / **"Agregar a pantalla
+  de inicio"**.
+- **iPhone (Safari)**: botón de compartir (□↑) → **"Agregar a pantalla
+  de inicio"**. iOS no soporta el banner automático de instalación, por
+  eso este paso es manual ahí.
+- **Escritorio (Chrome/Edge)**: ícono de instalación (⊕) al final de la
+  barra de direcciones.
+
+Con esto, la app abre en pantalla completa (sin la barra del navegador)
+y queda con su propio ícono, como cualquier otra app del celular.
+
+### Qué SÍ y qué NO hace esto
+
+- ✅ Ícono instalable, carga más rápida en visitas repetidas, arranque
+  más resistente a conexión lenta.
+- ❌ **No** permite completar ni guardar el checklist sin conexión —
+  eso sigue necesitando internet porque depende de Firestore en tiempo
+  real. Si en el futuro hace falta un modo realmente offline (por
+  ejemplo, zonas del local sin señal), es un desarrollo aparte
+  (guardado en cola local + sincronización cuando vuelve la conexión).
+
+### Si en el futuro modificás archivos de la app
+
+El Service Worker (`sw.js`) cachea los archivos para que carguen rápido.
+Esto tiene una consecuencia: si actualizás `app.js`, `styles.css`, etc.,
+**algunos usuarios podrían seguir viendo la versión vieja cacheada**
+hasta que el navegador note el cambio. Para forzar que todos reciban la
+actualización apenas la subís, cambiá el número de versión al principio
+de `sw.js`:
+
+```javascript
+const CACHE_NAME = 'checklist-app-v1';   // cambiar a v2, v3, etc.
+```
+
 ## Estructura del proyecto
 
 ```
 checklist-app/
 ├── index.html          → app principal
 ├── seed.html            → inicialización única de datos base
+├── manifest.json         → configuración de la PWA (nombre, íconos, colores)
+├── sw.js                 → Service Worker (cachea el shell de la app)
 ├── firestore.rules      → reglas de seguridad (pegar en Firebase Console)
+├── icons/                → íconos de la app (192, 512, maskable, apple-touch)
 ├── css/
 │   └── styles.css       → sistema de diseño
 └── js/
@@ -144,6 +197,6 @@ checklist-app/
     ├── data.js             → toda la lógica de acceso a Firestore
     ├── auth.js             → pantalla de login
     ├── checklist.js        → pantalla "Mi checklist"
-    ├── dashboard.js         → panel de supervisión / acciones correctivas
+    ├── dashboard.js         → panel de supervisión / métricas / historial
     └── admin.js             → administración (roles, sectores, preguntas, usuarios)
 ```
