@@ -6,17 +6,23 @@
 
 function AdminScreen({ usuario }) {
   const [tab, setTab] = React.useState('roles');
+  const [rolUsuario, setRolUsuario] = React.useState(null);
+
+  React.useEffect(() => { Data.getRol(usuario.rolId).then(setRolUsuario); }, [usuario.rolId]);
+
+  const puedeVerMantenimiento = rolUsuario && rolUsuario.permisos && rolUsuario.permisos.administrarRoles;
 
   const tabs = [
     { id: 'roles', label: 'Roles' },
     { id: 'sectores', label: 'Sectores' },
     { id: 'preguntas', label: 'Preguntas' },
-    { id: 'usuarios', label: 'Usuarios' }
+    { id: 'usuarios', label: 'Usuarios' },
+    ...(puedeVerMantenimiento ? [{ id: 'mantenimiento', label: '⚠ Mantenimiento' }] : [])
   ];
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {tabs.map(t => (
           <button
             key={t.id}
@@ -30,6 +36,7 @@ function AdminScreen({ usuario }) {
       {tab === 'sectores' && <AdminSectores />}
       {tab === 'preguntas' && <AdminPreguntas />}
       {tab === 'usuarios' && <AdminUsuarios />}
+      {tab === 'mantenimiento' && puedeVerMantenimiento && <AdminMantenimiento />}
     </div>
   );
 }
@@ -293,6 +300,8 @@ function AdminPreguntas() {
   const [replicando, setReplicando] = React.useState(null); // id de la pregunta que se está replicando
   const [mensajeReplicado, setMensajeReplicado] = React.useState('');
   const [preguntasDelRol, setPreguntasDelRol] = React.useState([]); // todas las activas del rol+momento, en cualquier sector
+  const [editandoId, setEditandoId] = React.useState(null);
+  const [editTexto, setEditTexto] = React.useState('');
   // Guardia inmediata (no depende de que React vuelva a renderizar) para
   // que un doble clic muy rápido en "Replicar" no dispare dos copias.
   const replicandoRef = React.useRef(new Set());
@@ -357,6 +366,19 @@ function AdminPreguntas() {
 
   async function desactivar(id) {
     await Data.desactivarPregunta(id);
+    cargarPreguntas(rolId, sectorId, momento);
+    cargarPreguntasDelRol(rolId, momento);
+  }
+
+  function empezarEdicion(p) {
+    setEditandoId(p.id);
+    setEditTexto(p.texto);
+  }
+
+  async function guardarEdicion(id) {
+    if (!editTexto.trim()) return;
+    await Data.actualizarTextoPregunta(id, editTexto);
+    setEditandoId(null);
     cargarPreguntas(rolId, sectorId, momento);
     cargarPreguntasDelRol(rolId, momento);
   }
@@ -487,6 +509,19 @@ function AdminPreguntas() {
           {preguntas && preguntas.filter(p => p.activa).map(p => {
             const enSectores = sectoresConEstaPregunta(p.texto);
             const enTodos = enSectores.size >= totalSectoresPosibles;
+
+            if (editandoId === p.id) {
+              return (
+                <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
+                  <input value={editTexto} onChange={e => setEditTexto(e.target.value)} autoFocus
+                         style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)' }} />
+                  <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }}
+                          disabled={!editTexto.trim()} onClick={() => guardarEdicion(p.id)}>Guardar</button>
+                  <button className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setEditandoId(null)}>Cancelar</button>
+                </div>
+              );
+            }
+
             return (
               <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
                 <div style={{ flex: 1 }}>
@@ -506,6 +541,7 @@ function AdminPreguntas() {
                     {replicando === p.id ? 'Replicando…' : '⧉ Replicar a todos los sectores'}
                   </button>
                 )}
+                <button className="btn btn-ghost" onClick={() => empezarEdicion(p)}>Editar</button>
                 <button className="btn btn-ghost" onClick={() => desactivar(p.id)}>Desactivar</button>
               </div>
             );
@@ -519,7 +555,78 @@ function AdminPreguntas() {
   );
 }
 
-/* ---------------- USUARIOS ---------------- */
+/* ---------------- MANTENIMIENTO (zona de riesgo) ---------------- */
+
+function AdminMantenimiento() {
+  const [confirmacion, setConfirmacion] = React.useState('');
+  const [borrando, setBorrando] = React.useState(false);
+  const [resultado, setResultado] = React.useState('');
+
+  const FRASE = 'BORRAR TODO';
+
+  async function ejecutarBorrado() {
+    if (confirmacion !== FRASE) return;
+    setBorrando(true);
+    setResultado('');
+    try {
+      const [preguntas, checklists, acciones] = await Promise.all([
+        Data.vaciarColeccion('preguntas'),
+        Data.vaciarColeccion('checklists_instancias'),
+        Data.vaciarColeccion('acciones_correctivas')
+      ]);
+      setResultado(
+        `Listo. Se borraron ${preguntas} preguntas, ${checklists} checklists y ${acciones} acciones correctivas. ` +
+        `Roles, sectores y usuarios NO se tocaron.`
+      );
+      setConfirmacion('');
+    } catch (err) {
+      console.error('Error en el borrado masivo:', err);
+      setResultado('Ocurrió un error al borrar — revisá la consola (F12). Puede que se haya borrado solo una parte.');
+    }
+    setBorrando(false);
+  }
+
+  return (
+    <div>
+      <div className="card" style={{ borderColor: 'var(--danger)' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--danger)', marginBottom: 8 }}>
+          ⚠ Borrar preguntas, checklists y acciones correctivas
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 6 }}>
+          Esto borra <strong>permanentemente</strong> y sin posibilidad de deshacer:
+        </div>
+        <ul style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 14, paddingLeft: 20 }}>
+          <li>Todas las <strong>preguntas</strong> (de todos los roles, sectores y turnos)</li>
+          <li>Todo el <strong>historial de checklists</strong> completados</li>
+          <li>Todas las <strong>acciones correctivas</strong> (pendientes y resueltas)</li>
+        </ul>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 14 }}>
+          <strong>NO se borran</strong> los roles, los sectores ni los usuarios — esa configuración queda intacta.
+          Usalo para arrancar de cero antes de salir a producción, o para limpiar datos de prueba.
+        </div>
+
+        <div className="field">
+          <label>Para confirmar, escribí exactamente: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--danger)' }}>{FRASE}</span></label>
+          <input value={confirmacion} onChange={e => setConfirmacion(e.target.value)} placeholder={FRASE} />
+        </div>
+
+        <button
+          className="btn btn-danger"
+          disabled={confirmacion !== FRASE || borrando}
+          onClick={ejecutarBorrado}
+        >
+          {borrando ? 'Borrando…' : 'Borrar todo definitivamente'}
+        </button>
+
+        {resultado && (
+          <div style={{ marginTop: 14, fontSize: 13, color: resultado.startsWith('Listo') ? 'var(--ok)' : 'var(--danger)' }}>
+            {resultado}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AdminUsuarios() {
   const [usuarios, setUsuarios] = React.useState(null);

@@ -57,8 +57,11 @@ service cloud.firestore {
     match /checklists_instancias/{instanciaId} {
       // Cualquier usuario logueado puede crear su propio checklist.
       allow create: if estaLogueado() && request.resource.data.usuarioId == request.auth.uid;
-      // Nadie edita ni borra un checklist ya guardado (inmutable / auditable).
-      allow update, delete: if false;
+      // Nadie edita un checklist ya guardado (inmutable / auditable).
+      allow update: if false;
+      // Borrado: reservado para quien tiene el permiso más alto (se usa
+      // solo desde Administración → Mantenimiento, para "empezar de cero").
+      allow delete: if tengoPermiso('administrarRoles');
       // Lectura: el dueño, o alguien con permiso de ver reportes/panel.
       allow read: if estaLogueado() &&
                      (resource.data.usuarioId == request.auth.uid ||
@@ -74,7 +77,8 @@ service cloud.firestore {
                       tengoPermiso('verReportesDeEquipo') ||
                       tengoPermiso('verPanelGlobal'));
       allow update: if tengoPermiso('resolverAccionesCorrectivas');
-      allow delete: if false;
+      // Borrado: reservado para quien tiene el permiso más alto (Mantenimiento).
+      allow delete: if tengoPermiso('administrarRoles');
     }
 
     // ---------------- ALERTAS ----------------

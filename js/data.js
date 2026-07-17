@@ -233,6 +233,27 @@ const Data = {
     });
   },
 
+  async actualizarTextoPregunta(preguntaId, texto) {
+    return db.collection('preguntas').doc(preguntaId).update({ texto: texto.trim() });
+  },
+
+  // Borra TODOS los documentos de una colección, en lotes de 450 (el límite
+  // de Firestore por batch es 500, dejamos margen). Devuelve la cantidad
+  // total de documentos borrados. Se usa desde Administración → Mantenimiento
+  // para "empezar de cero" en pruebas o antes de salir a producción.
+  async vaciarColeccion(nombreColeccion) {
+    let totalBorrados = 0;
+    while (true) {
+      const snap = await db.collection(nombreColeccion).limit(450).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      totalBorrados += snap.docs.length;
+    }
+    return totalBorrados;
+  },
+
   // Copia una pregunta a todos los demás sectores del mismo rol y del
   // mismo momento (AM/PM) — incluido "General", sectorId null — salteando
   // los sectores donde ya exista una pregunta activa con el mismo texto
