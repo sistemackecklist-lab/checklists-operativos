@@ -35,16 +35,31 @@ function DashboardScreen({ usuario }) {
   const [resueltas, setResueltas] = React.useState(null);
   const [errorHistorial, setErrorHistorial] = React.useState('');
   const [rolIds, setRolIds] = React.useState([usuario.rolId]);
+  const [equipo, setEquipo] = React.useState(null); // usuarios activos del equipo (excluyéndome a mí)
+  const [nombresSectores, setNombresSectores] = React.useState({});
 
   // Si el usuario tiene verPanelCompleto === false, solo ve sus propios
   // checklists y casos, aunque su rol tenga permiso de supervisar equipo.
   const modoCompleto = usuario.verPanelCompleto !== false;
+  const momentoActual = Data.getMomentoActual();
 
   React.useEffect(() => {
     async function cargar() {
       const subRoles = modoCompleto ? await Data.getRolesDescendientes(usuario.rolId) : [];
       const idsRoles = [usuario.rolId, ...subRoles.map(r => r.id)];
       setRolIds(idsRoles);
+
+      const sectoresTodos = await Data.getSectores();
+      const mapaSectores = {};
+      sectoresTodos.forEach(s => { mapaSectores[s.id] = s.nombre; });
+      setNombresSectores(mapaSectores);
+
+      if (modoCompleto) {
+        const todosUsuarios = await Data.getUsuarios();
+        setEquipo(todosUsuarios.filter(u => u.activo !== false && u.id !== usuario.id && idsRoles.includes(u.rolId)));
+      } else {
+        setEquipo([]);
+      }
 
       const pendTodas = await Data.getAccionesPendientes();
       const pend = modoCompleto
@@ -76,6 +91,26 @@ function DashboardScreen({ usuario }) {
   );
   const cumplimiento = totalRespuestas ? Math.round(100 * (totalRespuestas - totalNegativas) / totalRespuestas) : null;
 
+  // Arma una fila por cada combinación usuario+sector que debería reportar
+  // el turno actual, cruzando contra lo que ya se completó hoy.
+  const checklistsDelTurno = (checklistsHoy || []).filter(c => c.momento === momentoActual);
+  const estadoEquipo = (equipo || []).flatMap(u => {
+    const sectoresDelUsuario = (u.sectores && u.sectores.length) ? u.sectores : [null];
+    return sectoresDelUsuario.map(sectorId => {
+      const completado = checklistsDelTurno.some(
+        c => c.usuarioId === u.id && (c.sectorId || null) === (sectorId || null)
+      );
+      return {
+        key: u.id + ':' + (sectorId || 'general'),
+        nombre: u.nombre,
+        sector: sectorId ? (nombresSectores[sectorId] || sectorId) : null,
+        completado
+      };
+    });
+  }).sort((a, b) => (a.completado === b.completado ? 0 : a.completado ? 1 : -1));
+
+  const pendientesDelTurno = estadoEquipo.filter(e => !e.completado).length;
+
   return (
     <div>
       {!modoCompleto && (
@@ -104,6 +139,40 @@ function DashboardScreen({ usuario }) {
           <div className="stat-label">Cumplimiento de hoy</div>
         </div>
       </div>
+
+      {modoCompleto && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              Estado del equipo — turno {momentoActual}
+            </div>
+            {equipo !== null && (
+              <span style={{ fontSize: 12, color: pendientesDelTurno > 0 ? 'var(--danger)' : 'var(--ok)' }}>
+                {pendientesDelTurno === 0 ? 'Todos completaron' : `${pendientesDelTurno} pendiente${pendientesDelTurno === 1 ? '' : 's'}`}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 12 }}>
+            Quién ya reportó su checklist de hoy y quién todavía no, para el turno en curso.
+          </div>
+
+          {equipo === null && <div className="spinner-row">Cargando…</div>}
+          {equipo !== null && estadoEquipo.length === 0 && (
+            <div className="empty-state">No hay personas a cargo con checklist configurado.</div>
+          )}
+          {estadoEquipo.map(e => (
+            <div key={e.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid var(--border-soft)' }}>
+              <div>
+                <span style={{ fontSize: 14 }}>{e.nombre}</span>
+                {e.sector && <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 8 }}>· {e.sector}</span>}
+              </div>
+              {e.completado
+                ? <span className="badge badge-ok">✓ Completado</span>
+                : <span className="badge badge-danger">Pendiente</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 12 }}>

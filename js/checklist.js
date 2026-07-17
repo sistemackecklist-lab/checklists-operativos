@@ -103,7 +103,7 @@ function ChecklistDeSector({ usuario, sectorId, nombreSector, momento, mostrarVo
       setRespuestas({});
       setGuardadoOk(false);
       const [preg, completo] = await Promise.all([
-        Data.getPreguntasPorRolYSector(usuario.rolId, sectorId),
+        Data.getPreguntasPorRolSectorYMomento(usuario.rolId, sectorId, momento),
         Data.yaCompletoHoy(usuario.id, momento, sectorId)
       ]);
       setPreguntas(preg);
@@ -168,7 +168,7 @@ function ChecklistDeSector({ usuario, sectorId, nombreSector, momento, mostrarVo
       <div>
         {encabezadoSector}
         <div className="empty-state">
-          Todavía no hay preguntas configuradas para tu rol{nombreSector ? ` en el sector ${nombreSector}` : ''}.<br />
+          Todavía no hay preguntas configuradas para tu rol{nombreSector ? ` en el sector ${nombreSector}` : ''} para el turno {momento}.<br />
           Pedile a un administrador que las cargue en <strong>Administración → Preguntas</strong>.
         </div>
       </div>

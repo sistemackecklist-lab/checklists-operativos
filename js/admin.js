@@ -284,14 +284,15 @@ function AdminPreguntas() {
   const [sectores, setSectores] = React.useState([]);
   const [rolId, setRolId] = React.useState('');
   const [sectorId, setSectorId] = React.useState(''); // '' = todavía no elegido, 'general' = sin sector
+  const [momento, setMomento] = React.useState(''); // '' = todavía no elegido, 'AM' o 'PM'
   const [preguntas, setPreguntas] = React.useState(null);
   const [texto, setTexto] = React.useState('');
 
-  const [sinSector, setSinSector] = React.useState(null);
-  const [asignando, setAsignando] = React.useState({}); // { preguntaId: sectorIdElegido }
+  const [sinConfigurar, setSinConfigurar] = React.useState(null);
+  const [asignando, setAsignando] = React.useState({}); // { preguntaId: { sectorId, momento } }
   const [replicando, setReplicando] = React.useState(null); // id de la pregunta que se está replicando
   const [mensajeReplicado, setMensajeReplicado] = React.useState('');
-  const [preguntasDelRol, setPreguntasDelRol] = React.useState([]); // todas las activas del rol, en cualquier sector
+  const [preguntasDelRol, setPreguntasDelRol] = React.useState([]); // todas las activas del rol+momento, en cualquier sector
   // Guardia inmediata (no depende de que React vuelva a renderizar) para
   // que un doble clic muy rápido en "Replicar" no dispare dos copias.
   const replicandoRef = React.useRef(new Set());
@@ -301,26 +302,27 @@ function AdminPreguntas() {
     Data.getSectores().then(setSectores);
   }, []);
 
-  async function cargarPreguntas(rid, sid) {
-    if (!rid || !sid) { setPreguntas(null); return; }
-    setPreguntas(await Data.getPreguntasAdmin(rid, sid === 'general' ? null : sid));
+  async function cargarPreguntas(rid, sid, mom) {
+    if (!rid || !sid || !mom) { setPreguntas(null); return; }
+    setPreguntas(await Data.getPreguntasAdmin(rid, sid === 'general' ? null : sid, mom));
   }
 
-  async function cargarPreguntasDelRol(rid) {
-    if (!rid) { setPreguntasDelRol([]); return; }
-    setPreguntasDelRol(await Data.getPreguntasActivasPorRol(rid));
+  async function cargarPreguntasDelRol(rid, mom) {
+    if (!rid || !mom) { setPreguntasDelRol([]); return; }
+    setPreguntasDelRol(await Data.getPreguntasActivasPorRol(rid, mom));
   }
 
-  async function cargarSinSector(rid) {
-    if (!rid) { setSinSector(null); return; }
-    setSinSector(await Data.getPreguntasSinSector(rid));
+  async function cargarSinConfigurar(rid) {
+    if (!rid) { setSinConfigurar(null); return; }
+    setSinConfigurar(await Data.getPreguntasSinConfigurar(rid));
   }
 
-  React.useEffect(() => { setSectorId(''); cargarSinSector(rolId); cargarPreguntasDelRol(rolId); }, [rolId]);
-  React.useEffect(() => { cargarPreguntas(rolId, sectorId); setMensajeReplicado(''); }, [rolId, sectorId]);
+  React.useEffect(() => { setSectorId(''); setMomento(''); cargarSinConfigurar(rolId); }, [rolId]);
+  React.useEffect(() => { cargarPreguntasDelRol(rolId, momento); }, [rolId, momento]);
+  React.useEffect(() => { cargarPreguntas(rolId, sectorId, momento); setMensajeReplicado(''); }, [rolId, sectorId, momento]);
 
   // Cuántos sectores distintos (contando "General") ya tienen una pregunta
-  // ACTIVA con este mismo texto, dentro del mismo rol.
+  // ACTIVA con este mismo texto, para el mismo rol y el mismo momento.
   function sectoresConEstaPregunta(texto) {
     const normalizado = texto.trim().toLowerCase();
     const claves = new Set(
@@ -332,25 +334,31 @@ function AdminPreguntas() {
   }
   const totalSectoresPosibles = sectores.length + 1; // + "General"
 
-  async function migrarPregunta(preguntaId) {
-    const destino = asignando[preguntaId];
-    if (!destino) return;
-    await Data.asignarSectorAPregunta(preguntaId, destino === 'general' ? null : destino);
-    await cargarSinSector(rolId);
-    if (sectorId) cargarPreguntas(rolId, sectorId);
+  async function migrarPregunta(preguntaId, faltaSector, faltaMomento) {
+    const elegido = asignando[preguntaId] || {};
+    if (faltaSector && !elegido.sectorId) return;
+    if (faltaMomento && !elegido.momento) return;
+    await Data.completarConfiguracionPregunta(preguntaId, {
+      sectorId: faltaSector ? (elegido.sectorId === 'general' ? null : elegido.sectorId) : undefined,
+      momento: faltaMomento ? elegido.momento : undefined
+    });
+    await cargarSinConfigurar(rolId);
+    if (sectorId && momento) cargarPreguntas(rolId, sectorId, momento);
   }
 
   async function agregar() {
-    if (!texto.trim() || !rolId || !sectorId) return;
+    if (!texto.trim() || !rolId || !sectorId || !momento) return;
     const orden = (preguntas || []).length;
-    await Data.crearPregunta({ rolId, sectorId: sectorId === 'general' ? null : sectorId, texto: texto.trim(), orden });
+    await Data.crearPregunta({ rolId, sectorId: sectorId === 'general' ? null : sectorId, momento, texto: texto.trim(), orden });
     setTexto('');
-    cargarPreguntas(rolId, sectorId);
+    cargarPreguntas(rolId, sectorId, momento);
+    cargarPreguntasDelRol(rolId, momento);
   }
 
   async function desactivar(id) {
     await Data.desactivarPregunta(id);
-    cargarPreguntas(rolId, sectorId);
+    cargarPreguntas(rolId, sectorId, momento);
+    cargarPreguntasDelRol(rolId, momento);
   }
 
   async function replicar(pregunta) {
@@ -363,12 +371,12 @@ function AdminPreguntas() {
       const { creadas, saltadas } = await Data.replicarPreguntaATodosLosSectores(pregunta, sectorIds);
       setMensajeReplicado(
         creadas > 0
-          ? `Replicada a ${creadas} sector${creadas === 1 ? '' : 'es'} nuevo${creadas === 1 ? '' : 's'}` +
-            (saltadas > 0 ? ` (ya existía en ${saltadas}).` : '.')
-          : `Ya existía en todos los sectores, no se creó ninguna copia nueva.`
+          ? `Replicada a ${creadas} sector${creadas === 1 ? '' : 'es'} nuevo${creadas === 1 ? '' : 's'} (turno ${pregunta.momento})` +
+            (saltadas > 0 ? ` — ya existía en ${saltadas}.` : '.')
+          : `Ya existía en todos los sectores para el turno ${pregunta.momento}, no se creó ninguna copia nueva.`
       );
-      cargarPreguntas(rolId, sectorId);
-      cargarPreguntasDelRol(rolId);
+      cargarPreguntas(rolId, sectorId, momento);
+      cargarPreguntasDelRol(rolId, momento);
     } finally {
       replicandoRef.current.delete(pregunta.id);
       setReplicando(null);
@@ -388,6 +396,17 @@ function AdminPreguntas() {
 
         {rolId && (
           <div className="field">
+            <label>Turno</label>
+            <select value={momento} onChange={e => setMomento(e.target.value)}>
+              <option value="">Seleccioná un turno…</option>
+              <option value="AM">Mañana (AM)</option>
+              <option value="PM">Tarde (PM)</option>
+            </select>
+          </div>
+        )}
+
+        {rolId && momento && (
+          <div className="field">
             <label>Sector</label>
             <select value={sectorId} onChange={e => setSectorId(e.target.value)}>
               <option value="">Seleccioná un sector…</option>
@@ -397,7 +416,7 @@ function AdminPreguntas() {
           </div>
         )}
 
-        {rolId && sectorId && (
+        {rolId && momento && sectorId && (
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Texto de la nueva pregunta"
                    style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 12px', color: 'var(--text)' }} />
@@ -406,38 +425,60 @@ function AdminPreguntas() {
         )}
       </div>
 
-      {rolId && sinSector && sinSector.length > 0 && (
+      {rolId && sinConfigurar && sinConfigurar.length > 0 && (
         <div className="card" style={{ borderColor: 'var(--accent)' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 4, color: 'var(--accent)' }}>
-            ⚠️ Preguntas antiguas de este rol sin sector asignado
+            ⚠️ Preguntas antiguas de este rol sin configurar del todo
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 14 }}>
-            Estas preguntas se cargaron antes de que existiera la separación por sector, por eso no
-            aparecen en ningún checklist ahora. Elegí a qué sector pertenece cada una (o "General" si
-            no es específica de un sector) para que vuelvan a estar activas.
+            Estas preguntas se cargaron antes de que existiera la separación por sector y/o por turno
+            (AM/PM), por eso no aparecen en ningún checklist ahora. Completá lo que falte de cada una
+            para que vuelvan a estar activas.
           </div>
-          {sinSector.map(p => (
-            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)' }}>
-              <span style={{ flex: 1 }}>{p.texto}</span>
-              <select
-                value={asignando[p.id] || ''}
-                onChange={e => setAsignando(prev => ({ ...prev, [p.id]: e.target.value }))}
-                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}
-              >
-                <option value="">Asignar a…</option>
-                {sectores.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                <option value="general">General (sin sector)</option>
-              </select>
-              <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }}
-                      disabled={!asignando[p.id]} onClick={() => migrarPregunta(p.id)}>
-                Asignar
-              </button>
-            </div>
-          ))}
+          {sinConfigurar.map(p => {
+            const faltaSector = p.sectorId === undefined;
+            const faltaMomento = p.momento === undefined;
+            const elegido = asignando[p.id] || {};
+            const puedeAsignar = (!faltaSector || elegido.sectorId) && (!faltaMomento || elegido.momento);
+            return (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)', flexWrap: 'wrap' }}>
+                <span style={{ flex: 1, minWidth: 200 }}>{p.texto}</span>
+
+                {faltaMomento && (
+                  <select
+                    value={elegido.momento || ''}
+                    onChange={e => setAsignando(prev => ({ ...prev, [p.id]: { ...prev[p.id], momento: e.target.value } }))}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}
+                  >
+                    <option value="">Turno…</option>
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                  </select>
+                )}
+
+                {faltaSector && (
+                  <select
+                    value={elegido.sectorId || ''}
+                    onChange={e => setAsignando(prev => ({ ...prev, [p.id]: { ...prev[p.id], sectorId: e.target.value } }))}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)' }}
+                  >
+                    <option value="">Sector…</option>
+                    {sectores.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                    <option value="general">General (sin sector)</option>
+                  </select>
+                )}
+
+                <button className="btn btn-primary" style={{ padding: '6px 10px', fontSize: 12 }}
+                        disabled={!puedeAsignar} onClick={() => migrarPregunta(p.id, faltaSector, faltaMomento)}>
+                  Asignar
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {rolId && sectorId && (
+      {rolId && momento && sectorId && (
         <div className="card">
           {mensajeReplicado && (
             <div style={{ color: 'var(--ok)', fontSize: 13, marginBottom: 12 }}>{mensajeReplicado}</div>
@@ -451,17 +492,17 @@ function AdminPreguntas() {
                 <div style={{ flex: 1 }}>
                   <div>{p.texto}</div>
                   {enTodos ? (
-                    <span className="badge badge-ok" style={{ marginTop: 4 }}>✓ Replicada en todos los sectores</span>
+                    <span className="badge badge-ok" style={{ marginTop: 4 }}>✓ Replicada en todos los sectores ({momento})</span>
                   ) : (
                     <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                      En {enSectores.size} de {totalSectoresPosibles} sectores
+                      En {enSectores.size} de {totalSectoresPosibles} sectores (turno {momento})
                     </span>
                   )}
                 </div>
                 {!enTodos && (
                   <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
                           disabled={replicando === p.id} onClick={() => replicar(p)}
-                          title="Crea esta misma pregunta en los demás sectores de este rol (si todavía no la tienen)">
+                          title={`Crea esta misma pregunta en los demás sectores de este rol, para el turno ${momento} (si todavía no la tienen)`}>
                     {replicando === p.id ? 'Replicando…' : '⧉ Replicar a todos los sectores'}
                   </button>
                 )}
@@ -470,7 +511,7 @@ function AdminPreguntas() {
             );
           })}
           {preguntas && preguntas.filter(p => p.activa).length === 0 && (
-            <div className="empty-state">Este rol todavía no tiene preguntas activas para este sector.</div>
+            <div className="empty-state">Este rol todavía no tiene preguntas activas para este sector y este turno.</div>
           )}
         </div>
       )}

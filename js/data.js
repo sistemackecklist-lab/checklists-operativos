@@ -190,57 +190,59 @@ const Data = {
 
   // ---------- PREGUNTAS ----------
 
-  // Trae las preguntas activas de un rol para un sector específico.
-  // sectorId puede ser null (roles que no están atados a un sector físico,
-  // ej. Gerencia General): en ese caso se filtra por preguntas "generales"
-  // (sin sector asignado).
-  async getPreguntasPorRolYSector(rolId, sectorId) {
+  // Trae las preguntas activas de un rol, para un sector y un turno (AM/PM)
+  // específicos. sectorId puede ser null (roles sin sector físico).
+  async getPreguntasPorRolSectorYMomento(rolId, sectorId, momento) {
     const snap = await db.collection('preguntas')
       .where('rolId', '==', rolId)
       .where('sectorId', '==', sectorId || null)
+      .where('momento', '==', momento)
       .where('activa', '==', true)
       .orderBy('orden')
       .get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  // Todas las preguntas (activas o no) de un rol+sector, para administración.
-  async getPreguntasAdmin(rolId, sectorId) {
+  // Todas las preguntas (activas o no) de un rol+sector+momento, para administración.
+  async getPreguntasAdmin(rolId, sectorId, momento) {
     const snap = await db.collection('preguntas')
       .where('rolId', '==', rolId)
       .where('sectorId', '==', sectorId || null)
+      .where('momento', '==', momento)
       .get();
     return snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (a.orden || 0) - (b.orden || 0));
   },
 
-  // Todas las preguntas ACTIVAS de un rol, en cualquier sector. Sirve para
-  // calcular en cuántos sectores ya está replicada cada pregunta.
-  async getPreguntasActivasPorRol(rolId) {
+  // Todas las preguntas ACTIVAS de un rol y un momento, en cualquier sector.
+  // Sirve para calcular en cuántos sectores ya está replicada cada pregunta.
+  async getPreguntasActivasPorRol(rolId, momento) {
     const snap = await db.collection('preguntas')
       .where('rolId', '==', rolId)
+      .where('momento', '==', momento)
       .where('activa', '==', true)
       .get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   },
 
-  async crearPregunta({ rolId, sectorId, texto, orden }) {
+  async crearPregunta({ rolId, sectorId, momento, texto, orden }) {
     return db.collection('preguntas').add({
-      rolId, sectorId: sectorId || null, texto, orden: orden || 0, activa: true,
+      rolId, sectorId: sectorId || null, momento, texto, orden: orden || 0, activa: true,
       creadaEn: firebase.firestore.FieldValue.serverTimestamp()
     });
   },
 
-  // Copia una pregunta a todos los demás sectores del mismo rol (incluido
-  // "General", sectorId null), salteando los sectores donde ya exista una
-  // pregunta activa con el mismo texto para no duplicar.
+  // Copia una pregunta a todos los demás sectores del mismo rol y del
+  // mismo momento (AM/PM) — incluido "General", sectorId null — salteando
+  // los sectores donde ya exista una pregunta activa con el mismo texto
+  // para no duplicar.
   // Devuelve { creadas, saltadas } para poder informarle al usuario qué pasó.
   async replicarPreguntaATodosLosSectores(pregunta, todosLosSectorIds) {
     const destinos = [null, ...todosLosSectorIds].filter(sid => sid !== (pregunta.sectorId || null));
 
     const existentesPorSector = await Promise.all(
-      destinos.map(sid => this.getPreguntasAdmin(pregunta.rolId, sid))
+      destinos.map(sid => this.getPreguntasAdmin(pregunta.rolId, sid, pregunta.momento))
     );
 
     let creadas = 0, saltadas = 0;
@@ -254,6 +256,7 @@ const Data = {
       await this.crearPregunta({
         rolId: pregunta.rolId,
         sectorId: destinos[i],
+        momento: pregunta.momento,
         texto: pregunta.texto,
         orden: existentesPorSector[i].length
       });
@@ -262,18 +265,20 @@ const Data = {
     return { creadas, saltadas };
   },
 
-  // Preguntas de un rol creadas ANTES de que existiera el campo sectorId
-  // (por eso el campo directamente no existe en el documento, no es que
-  // valga null). Sirve para migrarlas una vez a un sector concreto.
-  async getPreguntasSinSector(rolId) {
+  // Preguntas de un rol a las que les falta sector y/o momento (AM/PM),
+  // porque se crearon antes de que esos campos existieran.
+  async getPreguntasSinConfigurar(rolId) {
     const snap = await db.collection('preguntas').where('rolId', '==', rolId).get();
     return snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.sectorId === undefined);
+      .filter(p => p.sectorId === undefined || p.momento === undefined);
   },
 
-  async asignarSectorAPregunta(preguntaId, sectorId) {
-    return db.collection('preguntas').doc(preguntaId).update({ sectorId: sectorId || null });
+  async completarConfiguracionPregunta(preguntaId, { sectorId, momento }) {
+    const datos = {};
+    if (sectorId !== undefined) datos.sectorId = sectorId || null;
+    if (momento !== undefined) datos.momento = momento;
+    return db.collection('preguntas').doc(preguntaId).update(datos);
   },
 
   async desactivarPregunta(preguntaId) {
