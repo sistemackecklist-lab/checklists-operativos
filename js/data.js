@@ -306,6 +306,10 @@ const Data = {
     return db.collection('preguntas').doc(preguntaId).update({ activa: false });
   },
 
+  async reactivarPregunta(preguntaId) {
+    return db.collection('preguntas').doc(preguntaId).update({ activa: true });
+  },
+
   // ---------- CHECKLISTS: INSTANCIAS ----------
 
   // Determina el momento (AM/PM) según la hora actual.

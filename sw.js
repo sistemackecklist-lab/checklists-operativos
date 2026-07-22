@@ -15,7 +15,7 @@
    versión nueva en vez de quedarse con el shell viejo cacheado.
    ============================================================ */
 
-const CACHE_NAME = 'checklist-app-v14';
+const CACHE_NAME = 'checklist-app-v15';
 
 const ASSETS_TO_CACHE = [
   './',

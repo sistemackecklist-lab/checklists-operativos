@@ -302,6 +302,7 @@ function AdminPreguntas() {
   const [preguntasDelRol, setPreguntasDelRol] = React.useState([]); // todas las activas del rol+momento, en cualquier sector
   const [editandoId, setEditandoId] = React.useState(null);
   const [editTexto, setEditTexto] = React.useState('');
+  const [verDesactivadas, setVerDesactivadas] = React.useState(false);
   // Guardia inmediata (no depende de que React vuelva a renderizar) para
   // que un doble clic muy rápido en "Replicar" no dispare dos copias.
   const replicandoRef = React.useRef(new Set());
@@ -328,7 +329,7 @@ function AdminPreguntas() {
 
   React.useEffect(() => { setSectorId(''); setMomento(''); cargarSinConfigurar(rolId); }, [rolId]);
   React.useEffect(() => { cargarPreguntasDelRol(rolId, momento); }, [rolId, momento]);
-  React.useEffect(() => { cargarPreguntas(rolId, sectorId, momento); setMensajeReplicado(''); }, [rolId, sectorId, momento]);
+  React.useEffect(() => { cargarPreguntas(rolId, sectorId, momento); setMensajeReplicado(''); setVerDesactivadas(false); }, [rolId, sectorId, momento]);
 
   // Cuántos sectores distintos (contando "General") ya tienen una pregunta
   // ACTIVA con este mismo texto, para el mismo rol y el mismo momento.
@@ -366,6 +367,12 @@ function AdminPreguntas() {
 
   async function desactivar(id) {
     await Data.desactivarPregunta(id);
+    cargarPreguntas(rolId, sectorId, momento);
+    cargarPreguntasDelRol(rolId, momento);
+  }
+
+  async function reactivar(id) {
+    await Data.reactivarPregunta(id);
     cargarPreguntas(rolId, sectorId, momento);
     cargarPreguntasDelRol(rolId, momento);
   }
@@ -548,6 +555,21 @@ function AdminPreguntas() {
           })}
           {preguntas && preguntas.filter(p => p.activa).length === 0 && (
             <div className="empty-state">Este rol todavía no tiene preguntas activas para este sector y este turno.</div>
+          )}
+
+          {preguntas && preguntas.filter(p => !p.activa).length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-soft)' }}>
+              <button className="btn btn-ghost" onClick={() => setVerDesactivadas(v => !v)}>
+                {verDesactivadas ? '▾' : '▸'} Preguntas desactivadas ({preguntas.filter(p => !p.activa).length})
+              </button>
+
+              {verDesactivadas && preguntas.filter(p => !p.activa).map(p => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-soft)', marginTop: 10 }}>
+                  <span style={{ flex: 1, color: 'var(--text-faint)' }}>{p.texto}</span>
+                  <button className="btn btn-primary" onClick={() => reactivar(p.id)}>Reactivar</button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
